@@ -89,6 +89,7 @@ function attempt(
       // Hard rules: holds the role, frequency > 0, not blocked, no section clash, and no consecutive
       // role for someone serving next week (they would have to be blocked from it).
       // Quota is soft only as a last resort: over-quota people rank after everyone within quota.
+      // Whoever held this role last week ranks next-to-last, so the role rotates.
       const ranked = people
         .filter(
           (p) =>
@@ -101,9 +102,10 @@ function attempt(
         .map((p) => {
           const u = used.get(p.id)!, q = quotas.get(p.id)!;
           const over = !busy.has(p.id) && u >= q;
-          return { id: p.id, over: over ? 1 : 0, fair: over ? u - q : u / q, last: servedLastWeek.has(p.id) ? 1 : 0, tie: rng() };
+          const again = previous[role.id]?.includes(p.id) ? 1 : 0;
+          return { id: p.id, over: over ? 1 : 0, again, fair: over ? u - q : u / q, last: servedLastWeek.has(p.id) ? 1 : 0, tie: rng() };
         })
-        .sort((a, b) => a.over - b.over || a.fair - b.fair || a.last - b.last || a.tie - b.tie);
+        .sort((a, b) => a.over - b.over || a.again - b.again || a.fair - b.fair || a.last - b.last || a.tie - b.tie);
 
       const chosen = ranked.slice(0, role.needs);
       if (chosen.length < role.needs) gaps.push(role.id);
