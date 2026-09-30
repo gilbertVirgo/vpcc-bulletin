@@ -1,0 +1,88 @@
+# vpcc-bulletin
+
+The VPCC Sunday serving rota. Anyone can view it; signed-in users (via the shared
+login at auth.vpcc.church) can edit cells, delete weeks, generate new weeks and
+manage people.
+
+## Architecture
+
+- Vite + TypeScript, no framework, plain CSS. Two pages: `index.html` (rota) and `people.html`.
+- Netlify Functions v2 in `netlify/functions` (`/api/*` → `/.netlify/functions/:splat`).
+  `GET /api/weeks` is public; everything else needs a valid `vpcc_session` cookie from the auth hub.
+- MongoDB: the calendar database (`rota_roles`, `rota_people`, `rota_weeks`).
+- The scheduler (`src/shared/schedule.ts`) is shared by the browser and the generate function.
+
+## Local development
+
+Needs Node 24 and the Netlify CLI. Local runs use the `calendar_dev` database, never `calendar`.
+
+`.env` (copy `.env.example`; never commit it) holds:
+`CALENDAR_MONGODB_URI` (the calendar's URI with the path changed to `/calendar_dev`),
+`JWT_SECRET` (any local value, identical to `../vpcc-auth/.env`),
+`AUTH_HUB_URL=http://localhost:8888`, `DEV_TEST_USERNAME`, `DEV_TEST_PASSWORD`,
+and `GOOGLE_SHEET_ID` (migration only). `../vpcc-auth/.env` needs the same
+`CALENDAR_MONGODB_URI` and `JWT_SECRET`.
+
+```bash
+npm install
+npm run seed:dev     # roles, people, indexes and the test user in calendar_dev (refuses any other DB)
+(cd ../vpcc-auth && npx netlify dev --port 8888 --no-open)                               # auth hub
+node --env-file-if-exists=.env "$(command -v netlify)" dev --port 8890 --no-open \
+  --functions "$PWD/netlify/functions"                                                   # bulletin → http://localhost:8890
+```
+
+From the main checkout plain `npx netlify dev --port 8890` also works. From a git
+worktree it does not: netlify-cli resolves the project root to the main checkout, so
+the command above loads `.env` itself and points at this tree's functions (it is the
+`bulletin` entry in `.claude/launch.json`).
+
+Sign in as the `general` test user: username `DEV_TEST_USERNAME`, password
+`DEV_TEST_PASSWORD`, both in `.env`.
+
+## Tests
+
+```bash
+npm run typecheck
+npm test             # vitest: scheduler, validation, http/auth, migration helpers
+npm run build        # typecheck + production build into dist/
+```
+
+## Migration
+
+`scripts/migrate.ts` imports roles and people from `~/rota-scheduler/data`
+(`--data <dir>` to override) and the future rows of the Google Sheet "Sundays" tab.
+It is idempotent: roles upsert by id, people by name, weeks by date (the sheet wins).
+Nothing is ever deleted; DB people not in the source are reported as "kept, not in source".
+
+```bash
+npm run migrate -- --dry-run      # read-only diff against the target DB: insert / update (fields) / unchanged / kept
+npm run migrate                   # writes; refuses a DB not ending in _dev
+CALENDAR_MONGODB_URI='<production uri>' npm run migrate -- --dry-run
+CALENDAR_MONGODB_URI='<production uri>' npm run migrate -- --production
+```
+
+`--dry-run` never writes (no index creation either), so it runs against any DB
+without `--production`.
+
+Sheet input: set `GOOGLE_SHEET_ID` and put a service-account key at
+`google/credentials.json` (gitignored; `--credentials <file>` to override). Without
+both the sheet step is skipped. `--sheet-fixture <file>` reads rows from a JSON
+`string[][]` instead (header row first), e.g. `scripts/fixtures/sheet.json`.
+Unmatched names are listed as skipped; add spellings to `ROLE_ALIASES` /
+`PERSON_ALIASES` in `scripts/sheet.ts` and re-run.
+
+## Deploying to Netlify (owner checklist)
+
+1. Create a site from this repo. `netlify.toml` sets the build: `npm run build`,
+   publish `dist`, functions `netlify/functions`, Node 24.
+2. Environment variables:
+   - `CALENDAR_MONGODB_URI`: the calendar site's `MONGODB_URI` (DB `calendar`).
+   - `JWT_SECRET`: identical to the auth hub (and the calendar and other sites sharing the login).
+   - `AUTH_HUB_URL`: optional, defaults to `https://auth.vpcc.church`.
+   - `COOKIE_DOMAIN`: optional, defaults to `.vpcc.church`.
+3. Serve it from a `*.vpcc.church` hostname (e.g. `bulletin.vpcc.church`). The login
+   cookie is scoped to `.vpcc.church`; on `*.netlify.app` it is never sent and nobody can sign in.
+4. Check the auth hub's `returnTo` / CORS allowlist covers the new hostname.
+5. MongoDB Atlas network access must allow Netlify (same rule as the calendar).
+6. Import production data once (dry run first, then `--production`, as above). The
+   real run also creates the unique index on `rota_weeks.date`.
