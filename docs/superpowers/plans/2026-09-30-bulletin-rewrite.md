@@ -3183,6 +3183,8 @@ npm run migrate                       # writes calendar_dev; run twice, second r
 CALENDAR_MONGODB_URI='mongodb://localhost:27017/calendar' node scripts/migrate.ts   # must throw "Refusing to write to "calendar"" before connecting
 ```
 
+> **Deviation (found in T7):** the last command above (a URI naming `calendar`) was blocked by the session's permission classifier and not run. The refusal is covered by `assertWritable`'s unit tests in `scripts/lib.test.ts`, and `migrate.ts` calls it before `connect()`. Idempotency was checked by hashing `rota_roles`/`rota_people`/`rota_weeks` in calendar_dev before and after two real runs (identical). The sheet step was only unit-tested (no credentials), so the week-upsert path has not run live.
+
 If `google/credentials.json` and `GOOGLE_SHEET_ID` are available in this worktree, also run the dry run with them and check the skipped list is sensible; otherwise note in the task report that the sheet step was only unit-tested.
 
 - [ ] **Step 5: Commit**
