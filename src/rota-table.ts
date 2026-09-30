@@ -5,6 +5,7 @@ import type { GeneratedWeek, PersonName, Role, Week } from "./shared/types";
 export type TableOptions = {
   onEditCell?: (week: Week, role: Role) => void;
   onDeleteWeek?: (week: Week, button: HTMLButtonElement) => void;
+  conflicts?: Map<string, string[]>; // cellKey -> messages, from findConflicts
 };
 
 /** Stable hook for putting focus back on a cell after the table is re-rendered. */
@@ -19,7 +20,7 @@ export function rotaTable(
   opts: TableOptions = {},
 ): HTMLElement {
   const names = new Map(people.map((p) => [p.id, p.name]));
-  const { onEditCell, onDeleteWeek } = opts;
+  const { onEditCell, onDeleteWeek, conflicts } = opts;
 
   const head = h(
     "tr",
@@ -39,15 +40,17 @@ export function rotaTable(
       ...roles.map((role) => {
         const text = (week.assignments[role.id] ?? []).map((id) => names.get(id) ?? "Unknown").join(", ");
         const gap = !role.manual && gaps.includes(role.id);
+        const problems = conflicts?.get(cellKey(week.date, role.id)) ?? [];
         const content = [
           text
             ? h("span", {}, text)
             : h("span", { class: "cell__empty" }, h("span", { "aria-hidden": "true" }, "–"), h("span", { class: "visually-hidden" }, "Nobody")),
           gap ? h("span", { class: "cell__gap-label" }, "Unfilled") : null,
+          problems.length ? h("span", { class: "cell__gap-label" }, "Conflict") : null,
         ];
         return h(
           "td",
-          { class: gap ? "cell cell--gap" : "cell" },
+          { class: gap || problems.length ? "cell cell--gap" : "cell", title: problems.join("\n") || undefined },
           onEditCell
             ? h(
                 "button",
@@ -55,7 +58,7 @@ export function rotaTable(
                   type: "button",
                   class: "cell__edit",
                   "data-cell": cellKey(week.date, role.id),
-                  "aria-label": `${role.name} on ${date}: ${text || "nobody"}. Edit`,
+                  "aria-label": `${role.name} on ${date}: ${text || "nobody"}.${problems.map((m) => ` ${m}.`).join("")} Edit`,
                   onclick: () => onEditCell(week, role),
                 },
                 ...content,
