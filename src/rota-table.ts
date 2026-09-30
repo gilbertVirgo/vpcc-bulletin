@@ -32,7 +32,22 @@ export function rotaTable(
     "tr",
     {},
     h("th", { scope: "col" }, "Role"),
-    ...weeks.map((w) => h("th", { scope: "col" }, h("time", { datetime: w.date }, shortDate(w.date)))),
+    ...weeks.map((w) =>
+      h(
+        "th",
+        { scope: "col" },
+        h("time", { datetime: w.date }, shortDate(w.date)),
+        // In the column head, so it plainly belongs to that Sunday.
+        onDeleteWeek
+          ? h(
+              "button",
+              { type: "button", class: "week-remove", onclick: (e) => onDeleteWeek(w, e.currentTarget as HTMLButtonElement) },
+              "Remove week",
+              h("span", { class: "visually-hidden" }, ` ${shortDate(w.date)}`),
+            )
+          : null,
+      ),
+    ),
   );
 
   const rows = roles.map((role) =>
@@ -71,30 +86,6 @@ export function rotaTable(
     ),
   );
 
-  const actions = onDeleteWeek
-    ? h(
-        "tr",
-        {},
-        h("th", { scope: "row" }, h("span", { class: "visually-hidden" }, "Actions")),
-        ...weeks.map((week) =>
-          h(
-            "td",
-            { class: "cell" },
-            h(
-              "button",
-              {
-                type: "button",
-                class: "button button--sm button--danger",
-                onclick: (e) => onDeleteWeek(week, e.currentTarget as HTMLButtonElement),
-              },
-              "Delete",
-              h("span", { class: "visually-hidden" }, ` ${shortDate(week.date)}`),
-            ),
-          ),
-        ),
-      )
-    : null;
-
   return h(
     "div",
     { class: "table-scroll", role: "region", "aria-label": caption, tabindex: 0 },
@@ -103,7 +94,7 @@ export function rotaTable(
       { class: "table" },
       h("caption", { class: "visually-hidden" }, caption),
       h("thead", {}, head),
-      h("tbody", {}, ...rows, actions),
+      h("tbody", {}, ...rows),
     ),
   );
 }
