@@ -281,7 +281,10 @@ dist
 .env
 google/credentials.json
 .superpowers
+deno.lock
 ```
+
+(`deno.lock` added in T1: `netlify dev` writes it for its edge runtime.)
 
 `.env.example`:
 
@@ -306,10 +309,12 @@ GOOGLE_SHEET_ID=
   "version": "0.0.1",
   "configurations": [
     { "name": "auth-hub", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd /Users/gilbertvirgo/vpcc/vpcc-auth && npx netlify dev --port 8888 --no-open"], "port": 8888 },
-    { "name": "bulletin", "runtimeExecutable": "npx", "runtimeArgs": ["netlify", "dev", "--port", "8890", "--no-open"], "port": 8890 }
+    { "name": "bulletin", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "node --env-file-if-exists=.env \"$(command -v netlify)\" dev --port 8890 --no-open --functions \"$PWD/netlify/functions\""], "port": 8890 }
   ]
 }
 ```
+
+> **Deviation (found in T1): netlify dev in a git worktree.** netlify-cli finds the project root by searching upward for a `.git` *directory*. In this worktree `.git` is a file, so the CLI resolves the root to the main checkout `/Users/gilbertvirgo/vpcc/vpcc-bulletin`: it loads no functions, ignores the worktree `.env`, writes `.netlify/` there and appends `.netlify` to the main checkout's `.gitignore`. Workaround used by the `bulletin` launch config (it also works in a normal checkout): load `.env` into the process with `node --env-file-if-exists=.env` and pass `--functions "$PWD/netlify/functions"`. Start the bulletin server only via this launch config (or the same command), never plain `npx netlify dev`.
 
 - [ ] **Step 4: Shared types** — write `src/shared/types.ts` exactly as in "Shared interfaces".
 
@@ -744,9 +749,12 @@ Expected: `Seeded calendar_dev: 10 roles, 17 people, user bulletin-test.` If Atl
 
 ```bash
 npm run typecheck && npm test
-npx netlify dev --port 8890 --no-open   # run in background
+# run in background; see the worktree deviation note under Step 3
+node --env-file-if-exists=.env "$(command -v netlify)" dev --port 8890 --no-open --functions "$PWD/netlify/functions"
 curl -s http://localhost:8890/api/me    # {"user":null,"hub":"http://localhost:8888"}
 ```
+
+`npm run build` cannot pass until T4 adds `index.html` and `people.html` (Vite's inputs); T1 verifies with `typecheck` only.
 
 Stop the dev server afterwards.
 
@@ -1513,7 +1521,7 @@ Run: `npm run typecheck && npm test` — Expected: PASS.
 
 - [ ] **Step 8: Exercise the API against calendar_dev**
 
-Start both servers in the background: `sh -c 'cd /Users/gilbertvirgo/vpcc/vpcc-auth && npx netlify dev --port 8888 --no-open'` and `npx netlify dev --port 8890 --no-open` (or `preview_start` with the `auth-hub` / `bulletin` entries in `.claude/launch.json`). Do not `source` `.env` (the URI contains `&`); read only the two test-user values, never echo them:
+Start both servers in the background: `sh -c 'cd /Users/gilbertvirgo/vpcc/vpcc-auth && npx netlify dev --port 8888 --no-open'` and `node --env-file-if-exists=.env "$(command -v netlify)" dev --port 8890 --no-open --functions "$PWD/netlify/functions"` (worktree-safe, see T1 Step 3 note; or `preview_start` with the `auth-hub` / `bulletin` entries in `.claude/launch.json`). Do not `source` `.env` (the URI contains `&`); read only the two test-user values, never echo them:
 
 ```bash
 J=$(mktemp); P=$(mktemp); B=http://localhost:8890/api
@@ -2332,7 +2340,7 @@ grep -rnE '#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|oklch\(' src/styles --include=*.c
 grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML' src   # expect nothing
 ```
 
-Run `npx netlify dev --port 8890 --no-open` in the background and load http://localhost:8890/ and /people: the header shows the orange logo, "Rota", and a "Log in" pill in Area Inktrap; the Log in href starts with `http://localhost:8888/?returnTo=`. Stop the server.
+Run `node --env-file-if-exists=.env "$(command -v netlify)" dev --port 8890 --no-open --functions "$PWD/netlify/functions"` in the background (worktree-safe, see T1 Step 3 note) and load http://localhost:8890/ and /people: the header shows the orange logo, "Rota", and a "Log in" pill in Area Inktrap; the Log in href starts with `http://localhost:8888/?returnTo=`. Stop the server.
 
 - [ ] **Step 10: Commit**
 

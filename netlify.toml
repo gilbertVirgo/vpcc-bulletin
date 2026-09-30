@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/people"
+  to = "/people.html"
+  status = 200
+
+[dev]
+  framework = "#custom"
+  command = "npm run dev"
+  targetPort = 5175
+  port = 8890
