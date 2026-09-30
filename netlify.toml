@@ -16,6 +16,11 @@
   to = "/people.html"
   status = 200
 
+[[redirects]]
+  from = "/role-info"
+  to = "/role-info.html"
+  status = 200
+
 [dev]
   framework = "#custom"
   command = "npm run dev"
