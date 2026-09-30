@@ -6,8 +6,9 @@ const TODAY = "2026-09-30";
 const GIL = "aaaaaaaaaaaaaaaaaaaaaaaa";
 const TOM = "bbbbbbbbbbbbbbbbbbbbbbbb";
 const ROLES: Role[] = [
-  { id: "worship", name: "Worship", needs: 1, busyFor: [0, 1, 2], consecutiveDisabled: true, order: 0 },
-  { id: "welcome", name: "Welcome", needs: 2, busyFor: [0], consecutiveDisabled: false, order: 1 },
+  { id: "worship", name: "Worship", needs: 1, busyFor: [0, 1, 2], consecutiveDisabled: true, order: 0, manual: false },
+  { id: "welcome", name: "Welcome", needs: 2, busyFor: [0], consecutiveDisabled: false, order: 1, manual: false },
+  { id: "preaching", name: "Preaching", needs: 1, busyFor: [], consecutiveDisabled: false, order: 10, manual: true },
 ];
 const PEOPLE: Person[] = [
   { id: GIL, name: "Gil", roles: ["worship", "welcome"], frequency: 0.8 },
@@ -84,6 +85,12 @@ describe("cell", () => {
     expect(cell("worship", [TOM], ROLES, PEOPLE, [TOM])).toEqual({ ok: true, value: [TOM] });
     expect(cell("worship", [TOM], ROLES, PEOPLE, [GIL])).toEqual({ ok: false, error: "Tom does not do Worship" });
   });
+  it("takes any existing person for a manual role, still checking ids, needs and duplicates", () => {
+    expect(cell("preaching", [TOM], ROLES, PEOPLE)).toEqual({ ok: true, value: [TOM] });
+    expect(cell("preaching", ["cccccccccccccccccccccccc"], ROLES, PEOPLE)).toEqual({ ok: false, error: "Unknown person cccccccccccccccccccccccc" });
+    expect(cell("preaching", [GIL, TOM], ROLES, PEOPLE).ok).toBe(false);
+    expect(cell("preaching", ["x"], ROLES, PEOPLE).ok).toBe(false);
+  });
   it("cellBody wraps cell", () => {
     expect(cellBody({ roleId: "worship", personIds: [GIL] }, ROLES, PEOPLE)).toEqual({
       ok: true,
@@ -99,7 +106,7 @@ describe("weeksBody", () => {
   it("normalises every role key", () => {
     expect(weeksBody({ weeks: [week("2026-10-04")] }, ROLES, PEOPLE, TODAY)).toEqual({
       ok: true,
-      value: [{ date: "2026-10-04", assignments: { worship: [GIL], welcome: [] } }],
+      value: [{ date: "2026-10-04", assignments: { worship: [GIL], welcome: [], preaching: [] } }],
     });
   });
   it("rejects bad batches", () => {
@@ -118,6 +125,6 @@ describe("weeksBody", () => {
   });
   it("ignores extra week keys such as gaps from a preview", () => {
     const r = weeksBody({ weeks: [{ ...week("2026-10-04"), gaps: ["welcome"] }] }, ROLES, PEOPLE, TODAY);
-    expect(r).toEqual({ ok: true, value: [{ date: "2026-10-04", assignments: { worship: [GIL], welcome: [] } }] });
+    expect(r).toEqual({ ok: true, value: [{ date: "2026-10-04", assignments: { worship: [GIL], welcome: [], preaching: [] } }] });
   });
 });

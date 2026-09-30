@@ -79,6 +79,10 @@ function attempt(
     const gaps: string[] = [];
 
     for (const role of roles) {
+      if (role.manual) {
+        assignments[role.id] = []; // filled by hand, never a gap
+        continue;
+      }
       // Hard rules: holds the role, frequency > 0, not blocked, no section clash, and no consecutive
       // role for someone serving next week (they would have to be blocked from it).
       // Quota is soft only as a last resort: over-quota people rank after everyone within quota.

@@ -48,7 +48,8 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 
 ```ts
 // rota_roles — seeded only, no UI
-{ _id: "worship", name: "Worship", needs: 1, busyFor: [0, 1, 2], consecutiveDisabled: true, order: 0 }
+{ _id: "worship", name: "Worship", needs: 1, busyFor: [0, 1, 2], consecutiveDisabled: true, order: 0, manual: false }
+{ _id: "preaching", name: "Preaching", needs: 1, busyFor: [], consecutiveDisabled: false, order: 10, manual: true }
 // rota_people
 { _id: ObjectId, name: "Gil", roles: ["worship", "lyrics"], frequency: 0.8 }
 // rota_weeks — unique index on date
@@ -56,6 +57,9 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 ```
 
 - Service sections: `0` pre-service, `1` during, `2` post-service.
+- Manual roles (`manual: true`, e.g. Preaching, added by our scripts on top of the
+  scheduler's roles): generate leaves the cell empty and never reports it as a gap;
+  nobody holds them (not offered on the People page), and a cell edit accepts any person.
 - Person ids inside `assignments` are 24-char hex strings, not ObjectIds.
 - Stored weeks always carry a key for every role id (empty array when unfilled).
 - The unique index is created by the scripts (`ensureIndexes`) and also ensured by
@@ -67,7 +71,8 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 
 - `date`: `YYYY-MM-DD`, a real calendar date, a Sunday; for writes also `>= today`.
 - Role ids must exist. Person ids must be 24-hex, exist, and hold the role — except
-  that a cell edit may keep someone already in that stored cell who no longer holds it.
+  that a cell edit may keep someone already in that stored cell who no longer holds it,
+  and a manual role takes any existing person.
 - A cell: array of unique person ids, length `0..needs`.
 - Manual cell edits skip the section-clash and consecutive rules — a human
   override is trusted.
@@ -196,22 +201,24 @@ refuses unless the DB name ends in `_dev` or `--production` is passed.
   upserts a `general` test user (`DEV_TEST_USERNAME` / `DEV_TEST_PASSWORD` from
   `.env`, bcrypt cost 10), ensures indexes.
 - `scripts/migrate.ts [--dry-run] [--production] [--data <dir>] [--credentials <file>]`
-  - (a) roles (`_id` = scheduler id, `order` = array index) upserted by `_id`;
+  - (a) roles (`_id` = scheduler id, `order` = array index; plus `MANUAL_ROLES` with
+    their own `order`) upserted by `_id`;
     people inserted by `name` only when missing (`$setOnInsert`; existing people are
     kept as edited in the app). Data dir defaults to `~/rota-scheduler/data`.
-  - (b) Sheet "Sundays": header row; column named "Date" parsed as `D MMMM YYYY`;
-    columns 0 and 1 ignored (as the old app did); other headers are person
-    names, cell = role name(s), comma-separated. Rows dated `>= today` only.
-    Person→role flipped to role→people. Names matched case-insensitively and
-    trimmed; roles matched by name or id, plus `ROLE_ALIASES`
-    (`"worship lead" → worship`, `"away" → ignored`) and an empty `PERSON_ALIASES`.
-    Skipped and reported: unknown person, unknown role, non-Sunday / unparseable
-    date, person not holding the role, extras beyond `needs`.
+  - (b) Sheet tab `GOOGLE_SHEET_TAB` (default `Schedule`): header row with a "Date"
+    column (`MMMM D YYYY` or `D MMMM YYYY`) and one column per role, headed with the
+    role name (trimmed, case-insensitive; also the role id or `ROLE_ALIASES`). Each
+    cell is a comma-separated list of people, matched trimmed and case-insensitively
+    (plus `PERSON_ALIASES`) against the DB's people and the scheduler data.
+    Every Sunday row with at least one assignment is migrated, past ones included
+    (they feed the scheduler's history; the rota view shows today onward).
+    Skipped and reported: unknown column, unknown person, non-Sunday / unparseable
+    date, person not holding a non-manual role, extras beyond `needs`.
     Weeks inserted by `date` only when missing (`$setOnInsert`; an existing week is
     kept as edited in the app). The dry run reports existing people and weeks as "kept".
   - Sheet step is skipped with a printed notice when the credentials file or
-    `GOOGLE_SHEET_ID` is missing. Zero future rows is a valid result.
-  - `--dry-run` never connects to Mongo; it prints the same report.
+    `GOOGLE_SHEET_ID` is missing. Zero rows is a valid result.
+  - `--dry-run` only reads Mongo (no writes, no index creation); it prints the same report.
   - Prints a report: counts upserted, skipped items with reasons.
 
 ## Dev and test
@@ -228,4 +235,4 @@ refuses unless the DB name ends in `_dev` or `--production` is passed.
 ## Out of scope
 
 Roles UI, unavailable dates, pairing rules, manual add-row, notes, admin-only
-gating, push notifications, migrating past sheet rows, dark mode.
+gating, push notifications, dark mode.

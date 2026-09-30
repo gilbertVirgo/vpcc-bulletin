@@ -6,7 +6,7 @@ import type { Assignments, GeneratedWeek, Person, Role, Week } from "./types";
 
 const PRE = 0, DURING = 1, POST = 2;
 const role = (id: string, busyFor: number[], extra: Partial<Role> = {}): Role => ({
-  id, name: id, needs: 1, busyFor, consecutiveDisabled: false, order: 0, ...extra,
+  id, name: id, needs: 1, busyFor, consecutiveDisabled: false, order: 0, manual: false, ...extra,
 });
 const person = (id: string, roles: string[], frequency = 1, name = id): Person => ({ id, name, roles, frequency });
 const sundays = (n: number) => Array.from({ length: n }, (_, i) => addDays("2026-10-04", 7 * i));
@@ -304,6 +304,20 @@ describe("generate", () => {
       const weeks = generate({ people, roles, dates: sundays(4), rng: mulberry32(seed) });
       for (let i = 1; i < 4; i++) expect(weeks[i].assignments.lead).not.toEqual(weeks[i - 1].assignments.lead);
     }
+  });
+
+  it("leaves manual roles empty and never counts them as gaps", () => {
+    const roles = [...ROLES, role("preaching", [], { order: 10, manual: true })];
+    const people = PEOPLE.map((p) => ({ ...p, roles: [...p.roles, "preaching"] })); // even if someone held it
+    for (const seed of SEEDS) {
+      const weeks = generate({ people, roles, dates: sundays(3), rng: mulberry32(seed) });
+      for (const w of weeks) {
+        expect(w.assignments.preaching).toEqual([]);
+        expect(w.gaps).not.toContain("preaching");
+      }
+    }
+    const [w] = generate({ people: [], roles: [role("preaching", [], { manual: true })], dates: sundays(1), rng: mulberry32(1) });
+    expect(w).toEqual({ date: sundays(1)[0], assignments: { preaching: [] }, gaps: [] });
   });
 
   it("gives needs > 1 distinct people", () => {

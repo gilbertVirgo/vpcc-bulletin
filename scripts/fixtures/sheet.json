@@ -1,7 +1,8 @@
 [
-  ["Date", "Notes", "Gil", "Beth", "Albany", "Ben B.", "Stranger"],
-  ["5 January 2020", "past: ignored", "Worship", "", "", "", ""],
-  ["6 January 2030", "", "Worship lead, Soundcheck", "Crêche", "Lyrics", "Welcome", "Welcome"],
-  ["7 January 2030", "not a Sunday", "Worship", "", "", "", ""],
-  ["13 January 2030", "", "Lyrics", "Welcome", "away", "Welcome, Refreshments", ""]
+  [" Date", "Worship", "Soundcheck", "Crêche", "Lyrics", "Worship support", "Communion Preparation", "Lunch Cleanup Lead", "Sunday Lunch", "Welcome", "Refreshments", "Preaching"],
+  ["June 7 2026", "Gil", "Rufus", "Albany", "Lucy", "Albany", "Beth", "Tom", "Emma", "Ambrose, Beth", "Rachel", "Ben V."],
+  ["June 14 2026", "Gil", "Rufus", "Emma", "Pascal", "Beth, Isaiah", "Lucy", "Ben B.", "Pascal (supervised by Gil)", "Albany, Tom", "Isaiah, Piper", "Dan"],
+  ["June 21 2026", "", "", "", "", "", "", "", "", "", "", ""],
+  ["June 22 2026", "Gil"],
+  ["October 4 2026", "", "", "", "", "", "", "", "", "", "", "Gil"]
 ]

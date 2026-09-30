@@ -38,7 +38,7 @@ export function rotaTable(
       h("th", { scope: "row" }, h("time", { datetime: week.date }, date)),
       ...roles.map((role) => {
         const text = (week.assignments[role.id] ?? []).map((id) => names.get(id) ?? "Unknown").join(", ");
-        const gap = gaps.includes(role.id);
+        const gap = !role.manual && gaps.includes(role.id);
         const content = [
           text
             ? h("span", {}, text)
