@@ -120,7 +120,7 @@ HTTP API (T3 implements, T5/T6 consume). All bodies JSON; errors are `{ error: s
 | PUT | `/api/people?id=X` | guarded | `PersonInput` | 200 `{ person: Person }` | 400, 404, 409 |
 | DELETE | `/api/people?id=X` | guarded | – | 200 `{ ok: true, weeksUpdated: number }` | 400, 404 |
 
-Guarded routes also return 401 `{ error, hub }` without a session and 415 for POST/PUT without `Content-Type: application/json`. Unlisted methods 405.
+Guarded routes also return 401 `{ error, hub }` without a session, 415 for POST/PUT without `Content-Type: application/json`, and 413 for a body over 16 KB. Malformed JSON is 400. Unlisted methods 405. Past dates are 400 on PUT/DELETE `/api/weeks` too (writes are `>= today`).
 
 Client helpers (T4, consumed by T5/T6):
 
@@ -1518,6 +1518,8 @@ export default route({
 ```
 
 If `tsc` rejects the `$pull` cast, use `as unknown as UpdateFilter<WeekDoc>` — nothing else. The same applies to the computed `$set` key in `weeks.mts` PUT: if its type is rejected, cast that update object `as UpdateFilter<WeekDoc>` (import the type from `mongodb`).
+
+> **Deviations (found in T3):** handlers read bodies with `readBody(req)` from `rota.ts` (returns the parsed JSON, `undefined` when malformed, or a 413 `Response` over 16 KB) instead of `readJson`. `POST /api/weeks` inserts with pre-generated `_id`s and, on a duplicate-key race, deletes its own inserts before answering 409, so a batch is all-or-nothing. `personInput` also rejects control characters in names. Person-name uniqueness is check-then-write (no unique index on name).
 
 - [ ] **Step 7: Typecheck and unit tests**
 
