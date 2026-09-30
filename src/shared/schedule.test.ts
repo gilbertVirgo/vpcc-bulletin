@@ -150,6 +150,17 @@ describe("generate", () => {
     }
   });
 
+  it("gives a role to whoever has done it least, ahead of overall fairness", () => {
+    const people = [person("a", ["r"]), person("b", ["r", "o"])];
+    const roles = [role("r", [PRE]), role("o", [POST], { order: 1 })];
+    // b has served more weeks overall, but a has had r every time.
+    const recent = [-5, -4, -3, -2].map((n): Week => ({ date: addDays("2026-10-04", 7 * n), assignments: n === -5 ? { o: ["b"] } : { r: ["a"], o: ["b"] } }));
+    for (const seed of SEEDS) {
+      const [w] = generate({ people, roles, dates: sundays(1), recent, rng: mulberry32(seed) });
+      expect(w.assignments.r).toEqual(["b"]);
+    }
+  });
+
   it("shares a role fairly, counting by id not name", () => {
     const people = [person("s1", ["r"], 1, "Sam"), person("s2", ["r"], 1, "Sam")];
     for (const seed of SEEDS) {
