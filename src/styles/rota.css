@@ -41,6 +41,77 @@
 	text-transform: uppercase;
 }
 
+/* Quiet until pointed at: the column head's date says which Sunday it removes. */
+.week-remove {
+	display: block;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--color-ink-muted);
+	font: inherit;
+	font-size: var(--text-caption);
+	letter-spacing: normal;
+	text-transform: none;
+	text-decoration: underline;
+	text-underline-offset: 0.2em;
+	cursor: pointer;
+}
+
+.week-remove:hover {
+	color: var(--color-danger);
+}
+
+.conflicts {
+	margin-bottom: calc(var(--spacing) * 6);
+	padding: calc(var(--spacing) * 4) calc(var(--spacing) * 5);
+	border-radius: var(--radius-md);
+	background-color: var(--color-danger-surface);
+	font-size: var(--text-body-sm);
+}
+
+.conflicts__title {
+	margin-bottom: calc(var(--spacing) * 2);
+	color: var(--color-danger);
+	font-weight: var(--font-weight-bold);
+}
+
+.conflicts__list {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: calc(var(--spacing) * 1) calc(var(--spacing) * 6);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* Subgrid, not display: contents, which drops list semantics in some screen readers. */
+.conflicts__list li {
+	display: grid;
+	grid-column: 1 / -1;
+	grid-template-columns: subgrid;
+}
+
+.conflicts__where {
+	color: var(--color-ink);
+	font-weight: var(--font-weight-bold);
+}
+
+.conflicts__list li > :last-child {
+	color: var(--color-ink-secondary);
+}
+
+/* Phones: stack where over what. */
+@media (max-width: 46.875rem) {
+	.conflicts__list {
+		grid-template-columns: 1fr;
+		gap: 0;
+	}
+
+	.conflicts__list li > :last-child {
+		margin-bottom: calc(var(--spacing) * 2);
+	}
+}
+
 .generate__form {
 	display: flex;
 	flex-wrap: wrap;
@@ -60,6 +131,7 @@
 /* Public view: one Sunday at a time. */
 .week-step {
 	max-width: var(--container-narrow);
+	margin-inline: auto;
 }
 
 .week-step__nav {
@@ -90,7 +162,9 @@
 	color: var(--color-ink-secondary);
 }
 
+/* 500 vs 700, never adjacent weights: the name is what people scan for. */
 .week-step__row dd {
 	margin: 0;
+	font-weight: var(--font-weight-bold);
 	text-align: right;
 }

@@ -10,9 +10,6 @@ const body = h("div", {});
 const status = h("p", { class: "status", role: "status" });
 let data: PeopleResponse = { people: [], roles: [] };
 
-// The API stores frequency as 0..1; people read it as a share of Sundays.
-const percent = (f: number): string => `${Math.round(f * 100)}%`;
-
 async function start(): Promise<void> {
   const me = await mountShell("people");
   if (!me.user) {
@@ -29,7 +26,7 @@ async function start(): Promise<void> {
       "div",
       { class: "page-head" },
       h("h1", {}, "People"),
-      h("button", { type: "button", class: "button button--primary", onclick: () => edit(null) }, "Add person"),
+      h("button", { type: "button", class: "button button--primary", onclick: add }, "Add person"),
     ),
     status,
     body,
@@ -56,20 +53,15 @@ function render(): void {
     h(
       "tr",
       {},
-      h("th", { scope: "row" }, p.name),
-      h("td", {}, data.roles.filter((r) => p.roles.includes(r.id)).map((r) => r.name).join(", ") || "–"),
-      h("td", {}, percent(p.frequency)),
+      h("th", { scope: "row" }, nameInput(p)),
+      h("td", {}, rolePills(p)),
+      h("td", {}, frequencyInput(p)),
       h(
         "td",
         {},
-        h(
-          "div",
-          { class: "row-actions" },
-          h("button", { type: "button", class: "button button--sm button--secondary", onclick: () => edit(p) },
-            "Edit", h("span", { class: "visually-hidden" }, ` ${p.name}`)),
+        h("div", { class: "row-actions" },
           h("button", { type: "button", class: "button button--sm button--danger", onclick: (e) => void remove(p, e.currentTarget as HTMLButtonElement) },
-            "Remove", h("span", { class: "visually-hidden" }, ` ${p.name}`)),
-        ),
+            "Remove", h("span", { class: "visually-hidden" }, ` ${p.name}`))),
       ),
     ),
   );
@@ -96,21 +88,96 @@ function render(): void {
   );
 }
 
-function edit(person: Person | null): void {
+/** Stores one change to a person. Throws (after reporting it) so the caller can put its control back. */
+async function update(person: Person, change: Partial<PersonInput>): Promise<void> {
+  const input: PersonInput = { name: person.name, roles: person.roles, frequency: person.frequency, ...change };
+  try {
+    const { person: saved } = await api<{ person: Person }>(`people?id=${person.id}`, { method: "PUT", body: input });
+    Object.assign(person, saved);
+    status.textContent = `Saved ${saved.name}.`;
+  } catch (err) {
+    status.textContent = `Could not save ${person.name}: ${message(err)}`;
+    throw err;
+  }
+}
+
+/** Looks like text until hovered or focused; saves on Enter or leaving the field. */
+function nameInput(p: Person): HTMLInputElement {
+  const input = h("input", {
+    class: "inline-input", required: true, maxlength: 60, autocomplete: "off", value: p.name, "aria-label": "Name",
+    onchange: () => {
+      const name = input.value.trim();
+      if (!name) return void (input.value = p.name);
+      update(p, { name }).catch(() => (input.value = p.name));
+    },
+  });
+  return input;
+}
+
+function frequencyInput(p: Person): HTMLElement {
+  const percent = () => String(Math.round(p.frequency * 100));
+  const input = h("input", {
+    class: "inline-input inline-input--number", type: "number", inputmode: "numeric", min: 0, max: 100, step: 1, value: percent(),
+    "aria-label": `Share of Sundays for ${p.name} (%). 100 = every Sunday, 0 = never scheduled.`,
+    onchange: () => {
+      if (!input.checkValidity() || input.value === "") return void (input.value = percent());
+      update(p, { frequency: input.valueAsNumber / 100 }).catch(() => (input.value = percent()));
+    },
+  });
+  return h("span", { class: "inline-percent" }, input, h("span", { "aria-hidden": "true" }, "%"));
+}
+
+/** A pill per role (× removes it) and a + menu of the roles they don't have. */
+function rolePills(p: Person): HTMLElement {
+  const wrap = h("div", { class: "pills" });
+  const roles = data.roles.filter((r) => !r.manual); // nobody holds a manual role
+  const change = async (roles: string[]) => {
+    await update(p, { roles }).catch(() => {});
+    wrap.replaceWith(rolePills(p));
+    document.querySelector<HTMLElement>(`[data-add-role="${p.id}"]`)?.focus();
+  };
+  const missing = roles.filter((r) => !p.roles.includes(r.id));
+  const add = h(
+    "select",
+    {
+      class: "pill pill--add", "data-add-role": p.id, "aria-label": `Add a role for ${p.name}`,
+      onchange: () => void change([...p.roles, add.value]),
+    },
+    h("option", { value: "", hidden: true, selected: true }, "+"),
+    ...missing.map((r) => h("option", { value: r.id }, r.name)),
+  );
+  wrap.append(
+    ...roles
+      .filter((r) => p.roles.includes(r.id))
+      .map((r) =>
+        h(
+          "span",
+          { class: "pill" },
+          r.name,
+          h("button", {
+            type: "button", class: "pill__remove", "aria-label": `Remove ${r.name} from ${p.name}`,
+            onclick: () => void change(p.roles.filter((id) => id !== r.id)),
+          }, "×"),
+        ),
+      ),
+    ...(missing.length ? [add] : []),
+  );
+  return wrap;
+}
+
+function add(): void {
   const error = h("p", { id: "person-error", class: "error", role: "alert" });
   const name = h("input", {
-    id: "person-name", class: "control", required: true, maxlength: 60, autocomplete: "off", value: person?.name ?? "",
+    id: "person-name", class: "control", required: true, maxlength: 60, autocomplete: "off",
     "aria-describedby": "person-error",
   });
   const frequency = h("input", {
     id: "person-frequency", class: "control control--short", type: "number", inputmode: "numeric", min: 0, max: 100, step: 1,
-    required: true, value: Math.round((person?.frequency ?? 0.5) * 100), "aria-describedby": "person-frequency-hint",
+    required: true, value: 50, "aria-describedby": "person-frequency-hint",
   });
   const roles = data.roles.filter((r) => !r.manual); // nobody holds a manual role
-  const boxes = roles.map((r) =>
-    h("input", { type: "checkbox", id: `role-${r.id}`, value: r.id, checked: person?.roles.includes(r.id) ?? false }),
-  );
-  const submit = h("button", { type: "submit", class: "button button--primary" }, person ? "Save" : "Add");
+  const boxes = roles.map((r) => h("input", { type: "checkbox", id: `role-${r.id}`, value: r.id }));
+  const submit = h("button", { type: "submit", class: "button button--primary" }, "Add");
   const form = h(
     "form",
     { class: "stack" },
@@ -137,7 +204,7 @@ function edit(person: Person | null): void {
       submit,
     ),
   );
-  const dialog = openModal(person ? `Edit ${person.name}` : "Add person", form);
+  const dialog = openModal("Add person", form);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     error.textContent = "";
@@ -148,9 +215,9 @@ function edit(person: Person | null): void {
     };
     submit.disabled = true;
     try {
-      await api(person ? `people?id=${person.id}` : "people", { method: person ? "PUT" : "POST", body: input });
+      await api("people", { method: "POST", body: input });
       dialog.close();
-      status.textContent = person ? `Saved ${input.name}.` : `Added ${input.name}.`;
+      status.textContent = `Added ${input.name}.`;
       await load();
     } catch (err) {
       error.textContent = message(err);
