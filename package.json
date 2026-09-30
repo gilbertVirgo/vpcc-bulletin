@@ -1,22 +1,29 @@
 {
-	"name": "vpcc-servers-dashboard",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
-	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
-	"dependencies": {
-		"cors": "^2.8.5",
-		"dayjs": "^1.11.11",
-		"dotenv": "^16.4.5",
-		"express": "^4.19.2",
-		"google-spreadsheet": "^4.1.1",
-		"googleapis": "^137.1.0",
-		"node-cron": "^3.0.3"
-	},
-	"type": "module"
+  "name": "vpcc-bulletin",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed:dev": "node --env-file-if-exists=.env scripts/seed-dev.ts",
+    "migrate": "node --env-file-if-exists=.env scripts/migrate.ts"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.7.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.6.3",
+    "bcryptjs": "^3.0.3",
+    "googleapis": "^182.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
 }

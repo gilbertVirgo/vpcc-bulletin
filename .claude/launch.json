@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "auth-hub", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd /Users/gilbertvirgo/vpcc/vpcc-auth && npx netlify dev --port 8888 --no-open"], "port": 8888 },
+    { "name": "bulletin", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "node --env-file-if-exists=.env \"$(command -v netlify)\" dev --port 8890 --no-open --functions \"$PWD/netlify/functions\""], "port": 8890 }
+  ]
+}

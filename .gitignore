@@ -1,10 +1,7 @@
-# Auto generated
 node_modules
-cache.json
-log/
-private/
-
-# Need to be copied
+dist
+.netlify
 .env
 google/credentials.json
-vapid.json
+.superpowers
+deno.lock
