@@ -2,7 +2,7 @@ import "./styles/index.css";
 import "./styles/rota.css";
 import { ApiError, api, message } from "./api";
 import { h } from "./dom";
-import { cellKey, rotaTable } from "./rota-table";
+import { cellKey, rotaTable, rotaWeek } from "./rota-table";
 import { shortDate } from "./shared/dates";
 import type { GeneratedWeek, Me, PeopleResponse, Person, Role, RotaResponse, Week } from "./shared/types";
 import { mountShell } from "./shell";
@@ -33,7 +33,7 @@ async function start(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  body.replaceChildren(skeletonTable(11, 4, "Loading the rota"));
+  body.replaceChildren(skeletonTable(me.user ? 5 : 2, 11, "Loading the rota"));
   try {
     const [r, p] = await Promise.all([
       api<RotaResponse>("weeks"),
@@ -55,7 +55,9 @@ function render(): void {
     return;
   }
   body.replaceChildren(
-    rotaTable(rota.roles, rota.people, rota.weeks, "Sunday rota", me.user ? { onEditCell: editCell, onDeleteWeek: deleteWeek } : {}),
+    me.user
+      ? rotaTable(rota.roles, rota.people, rota.weeks, "Sunday rota", { onEditCell: editCell, onDeleteWeek: deleteWeek })
+      : rotaWeek(rota.roles, rota.people, rota.weeks),
   );
 }
 
