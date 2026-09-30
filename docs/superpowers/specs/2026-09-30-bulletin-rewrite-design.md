@@ -99,28 +99,36 @@ weeks.
 
 `coming = nextSunday(now)` (today if today is Sunday). `last` = latest stored week.
 `start = last && last.date >= coming ? last.date + 7 : coming`. Dates are
-`start, start+7, …` for the requested count. `history = last.assignments` only
-when `last.date === start - 7`, otherwise none.
+`start, start+7, …` for the requested count. The newest 8 stored weeks (past or
+future) are passed to the scheduler as `recent`.
 
 ## Scheduler
 
-Pure `generate({ people, roles, dates, history, rng }) → GeneratedWeek[]` in
+Pure `generate({ people, roles, dates, recent, rng }) → GeneratedWeek[]` in
 `src/shared/schedule.ts`; `GeneratedWeek = Week & { gaps: string[] }` (role ids
-left short).
+left short). `planDates(coming, stored, count) → { dates, recent }`.
 
-- `quota = frequency > 0 && weeks > 0 ? Math.round(min(frequency,1) × weeks) : 0`.
-  Quota counts **weeks served**; two roles in one week count once. Quota is a
-  hard cap, as in the original.
+- Frequency is accounted over a rolling window: `recent` (the newest 8 stored
+  weeks before the first new date) plus the new dates. Users often generate 1–2
+  weeks at a time, so a per-run quota would make frequency meaningless.
+- `quota = frequency > 0 && window > 0 ? max(1, round(min(frequency,1) × window)) : 0`.
+  Quota counts **weeks served**; two roles in one week count once. `used` starts
+  at the number of recent weeks the person served in.
 - Roles processed in ascending `order`.
-- Candidate for a role: holds it; not blocked; quota not used up (or already
-  serving this week); none of the role's `busyFor` sections already taken this week.
-- Blocked: anyone who held a `consecutiveDisabled` role in the previous week
-  (the history week for week 1) — blocked from every role that week.
-- Order: `used/quota` ascending, then "served previous week" last, then a random
-  key from `rng`. Top `needs` are taken.
+- Hard rules for a candidate: holds the role; frequency > 0; not blocked; none of
+  the role's `busyFor` sections already taken this week.
+- Blocked: anyone who held a `consecutiveDisabled` role in the previous week — blocked
+  from every role that week. For week 1 the previous week is the newest `recent`
+  week only when it is exactly 7 days before the first date; `generate` checks
+  this itself. The same applies to the served-last-week ordering.
+- Order: people within quota (or already serving this week) first, by `used/quota`;
+  then over-quota people, least over first. Ties: "served previous week" last, then
+  a random key from `rng`. Top `needs` are taken. Quota is thus a cap, exceeded only
+  to avoid a gap; gaps remain only for true infeasibility.
 - An attempt fills what it can; short cells stay partial and are listed in `gaps`.
-  Up to 50 attempts; stops at the first attempt with no gaps, else returns the
-  attempt with fewest gaps. Never throws for infeasibility; never loops forever.
+  Up to 50 attempts; stops at the first attempt with no gaps and no quota overflow,
+  else returns the attempt with fewest gaps, then fewest overflows. Never throws for
+  infeasibility; never loops forever.
 - Fairness accounting keyed by person id; inputs are never mutated.
 - Server passes `Math.random`; tests pass `mulberry32(seed)` from `src/shared/rng.ts`.
 

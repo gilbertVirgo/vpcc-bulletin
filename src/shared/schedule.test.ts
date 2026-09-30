@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { addDays } from "./dates";
 import { mulberry32 } from "./rng";
 import { generate, planDates, quota } from "./schedule";
-import type { GeneratedWeek, Person, Role } from "./types";
+import type { Assignments, GeneratedWeek, Person, Role, Week } from "./types";
 
 const PRE = 0, DURING = 1, POST = 2;
 const role = (id: string, busyFor: number[], extra: Partial<Role> = {}): Role => ({
@@ -13,6 +13,15 @@ const sundays = (n: number) => Array.from({ length: n }, (_, i) => addDays("2026
 const servedIn = (w: GeneratedWeek, id: string) => Object.values(w.assignments).some((ids) => ids.includes(id));
 const served = (weeks: GeneratedWeek[], id: string) => weeks.filter((w) => servedIn(w, id)).length;
 const SEEDS = Array.from({ length: 30 }, (_, i) => i + 1);
+const LAST_SUNDAY = addDays("2026-10-04", -7);
+const lastWeek = (assignments: Assignments): Week[] => [{ date: LAST_SUNDAY, assignments }];
+/** Generate one week at a time, feeding the output back as up to 8 recent weeks. */
+const rolling = (people: Person[], roles: Role[], weeks: number, seed: number) => {
+  const rng = mulberry32(seed);
+  const out: GeneratedWeek[] = [];
+  for (const date of sundays(weeks)) out.push(...generate({ people, roles, dates: [date], recent: out.slice(-8), rng }));
+  return out;
+};
 
 // Real data from /Users/gilbertvirgo/rota-scheduler/data (2026-09-30).
 const ROLES: Role[] = [
@@ -51,8 +60,8 @@ const real = (seed: number, weeks = 5) =>
 
 describe("quota", () => {
   it.each([
-    [0.8, 5, 4], [0.2, 5, 1], [0.2, 1, 0], [0.5, 1, 1], [1, 4, 4],
-    [0, 5, 0], [1, 0, 0], [Number.NaN, 3, 0], [1.5, 2, 2],
+    [0.8, 5, 4], [0.2, 5, 1], [0.2, 1, 1], [0.05, 9, 1], [0.2, 9, 2], [0.5, 1, 1], [1, 4, 4],
+    [0, 5, 0], [1, 0, 0], [-1, 3, 0], [Number.NaN, 3, 0], [1.5, 2, 2],
   ])("quota(%d, %d) = %d", (f, w, want) => {
     expect(quota(f, w)).toBe(want);
   });
@@ -60,19 +69,28 @@ describe("quota", () => {
 
 describe("planDates", () => {
   const coming = "2026-10-04";
-  const a = { worship: ["gil"] };
+  const wk = (date: string): Week => ({ date, assignments: { worship: ["gil"] } });
   it("starts at the coming Sunday when nothing is stored", () => {
-    expect(planDates(coming, null, 3)).toEqual({ dates: ["2026-10-04", "2026-10-11", "2026-10-18"], history: null });
+    expect(planDates(coming, [], 3)).toEqual({ dates: ["2026-10-04", "2026-10-11", "2026-10-18"], recent: [] });
   });
-  it("continues after the last future week and uses it as history", () => {
-    expect(planDates(coming, { date: "2026-10-18", assignments: a }, 1)).toEqual({ dates: ["2026-10-25"], history: a });
-    expect(planDates(coming, { date: coming, assignments: a }, 1)).toEqual({ dates: ["2026-10-11"], history: a });
+  it("continues after the last future week, returning stored weeks oldest first", () => {
+    expect(planDates(coming, [wk("2026-10-18"), wk("2026-10-11")], 1)).toEqual({
+      dates: ["2026-10-25"],
+      recent: [wk("2026-10-11"), wk("2026-10-18")],
+    });
+    expect(planDates(coming, [wk(coming)], 1)).toEqual({ dates: ["2026-10-11"], recent: [wk(coming)] });
   });
-  it("uses last Sunday as history when it is the week before", () => {
-    expect(planDates(coming, { date: "2026-09-27", assignments: a }, 1)).toEqual({ dates: [coming], history: a });
+  it("starts at the coming Sunday after past weeks and keeps them for frequency", () => {
+    expect(planDates(coming, [wk("2026-09-13"), wk("2026-09-27")], 2)).toEqual({
+      dates: [coming, "2026-10-11"],
+      recent: [wk("2026-09-13"), wk("2026-09-27")],
+    });
   });
-  it("ignores an older last week", () => {
-    expect(planDates(coming, { date: "2026-09-13", assignments: a }, 1)).toEqual({ dates: [coming], history: null });
+  it("keeps at most the newest 8 weeks", () => {
+    const stored = Array.from({ length: 10 }, (_, i) => wk(addDays("2026-07-26", 7 * i)));
+    const { dates, recent } = planDates(coming, stored, 1);
+    expect(dates).toEqual([coming]);
+    expect(recent).toEqual(stored.slice(2));
   });
 });
 
@@ -119,7 +137,7 @@ describe("generate", () => {
 
   it("blocks the history week's consecutive holder from week 1", () => {
     for (const seed of SEEDS) {
-      const [w] = generate({ people: PEOPLE, roles: ROLES, dates: sundays(1), history: { worship: ["gil"] }, rng: mulberry32(seed) });
+      const [w] = generate({ people: PEOPLE, roles: ROLES, dates: sundays(1), recent: lastWeek({ worship: ["gil"] }), rng: mulberry32(seed) });
       expect(servedIn(w, "gil")).toBe(false);
       expect(w.assignments.worship).toEqual(["jonny"]);
     }
@@ -128,7 +146,7 @@ describe("generate", () => {
   it("puts last week's servers at the back when fairness is equal", () => {
     const people = [person("a", ["r"]), person("b", ["r"])];
     for (const seed of SEEDS) {
-      const [w] = generate({ people, roles: [role("r", [PRE])], dates: sundays(1), history: { r: ["a"] }, rng: mulberry32(seed) });
+      const [w] = generate({ people, roles: [role("r", [PRE])], dates: sundays(1), recent: lastWeek({ r: ["a"] }), rng: mulberry32(seed) });
       expect(w.assignments.r).toEqual(["b"]);
     }
   });
@@ -139,6 +157,72 @@ describe("generate", () => {
       const weeks = generate({ people, roles: [role("r", [PRE])], dates: sundays(4), rng: mulberry32(seed) });
       expect([served(weeks, "s1"), served(weeks, "s2")]).toEqual([2, 2]);
     }
+  });
+
+  it("applies last-week rules only when the newest recent week is exactly 7 days before", () => {
+    const people = [person("a", ["lead"])];
+    const roles = [role("lead", [PRE], { consecutiveDisabled: true })];
+    const run = (date: string) =>
+      generate({ people, roles, dates: sundays(1), recent: [{ date, assignments: { lead: ["a"] } }], rng: mulberry32(1) })[0];
+    expect(run(LAST_SUNDAY)).toMatchObject({ assignments: { lead: [] }, gaps: ["lead"] });
+    expect(run(addDays(LAST_SUNDAY, -7))).toMatchObject({ assignments: { lead: ["a"] }, gaps: [] });
+    // Recent weeks on or after the first new date are ignored entirely.
+    expect(run("2026-10-04")).toMatchObject({ assignments: { lead: ["a"] }, gaps: [] });
+  });
+
+  it("counts recent weeks towards quota", () => {
+    const people = [person("a", ["r"], 0.5), person("b", ["r"], 0.5)];
+    const recent: Week[] = [
+      { date: addDays(LAST_SUNDAY, -7), assignments: { r: ["a"] } },
+      { date: LAST_SUNDAY, assignments: { r: ["a"] } },
+    ];
+    for (const seed of SEEDS) {
+      const weeks = generate({ people, roles: [role("r", [PRE])], dates: sundays(2), recent, rng: mulberry32(seed) });
+      expect(weeks.map((w) => w.assignments.r)).toEqual([["b"], ["b"]]);
+    }
+  });
+
+  it("serves people in proportion to frequency across one-week runs", () => {
+    const people = [person("a", ["r"], 0.5), person("b", ["r"], 0.3), person("c", ["r"], 0.2)];
+    for (const seed of SEEDS) {
+      const weeks = rolling(people, [role("r", [PRE])], 10, seed);
+      expect(weeks.every((w) => w.gaps.length === 0)).toBe(true);
+      expect(served(weeks, "a")).toBeGreaterThanOrEqual(4);
+      expect(served(weeks, "a")).toBeLessThanOrEqual(6);
+      expect(served(weeks, "b")).toBeGreaterThanOrEqual(2);
+      expect(served(weeks, "b")).toBeLessThanOrEqual(4);
+      expect(served(weeks, "c")).toBeGreaterThanOrEqual(1);
+      expect(served(weeks, "c")).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("keeps real data fair across ten one-week runs", () => {
+    for (const seed of SEEDS) {
+      const weeks = rolling(PEOPLE, ROLES, 10, seed);
+      expect(weeks.flatMap((w) => w.gaps)).toEqual([]);
+      for (const p of PEOPLE) {
+        const n = served(weeks, p.id);
+        // Demand is below total availability, so people land somewhat under their frequency, never far.
+        expect(n).toBeGreaterThanOrEqual(Math.max(1, Math.floor(p.frequency * 10 * 0.6))); // low-frequency people do get picked
+        expect(n).toBeLessThanOrEqual(Math.ceil(p.frequency * 10) + 1);
+      }
+      expect(served(weeks, "pascal-sup")).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("overflows quota as a last resort, least-over first, instead of leaving a gap", () => {
+    const people = [person("a", ["r"], 0.2), person("b", ["r"], 0.4)];
+    for (const seed of SEEDS) {
+      const weeks = generate({ people, roles: [role("r", [PRE])], dates: sundays(5), rng: mulberry32(seed) });
+      expect(weeks.flatMap((w) => w.gaps)).toEqual([]);
+      expect([served(weeks, "a"), served(weeks, "b")].sort()).toEqual([2, 3]);
+    }
+  });
+
+  it("never overflows into frequency 0", () => {
+    const weeks = generate({ people: [person("zero", ["r"], 0)], roles: [role("r", [PRE])], dates: sundays(2), rng: mulberry32(1) });
+    expect(weeks.map((w) => w.assignments.r)).toEqual([[], []]);
+    expect(weeks.map((w) => w.gaps)).toEqual([["r"], ["r"]]);
   });
 
   it("never schedules frequency 0", () => {
@@ -180,8 +264,8 @@ describe("generate", () => {
     };
     const people = freeze(structuredClone(PEOPLE));
     const roles = freeze(structuredClone(ROLES).reverse());
-    const history = freeze({ worship: ["gil"] });
-    expect(() => generate({ people, roles, dates: sundays(5), history, rng: mulberry32(3) })).not.toThrow();
+    const recent = freeze(lastWeek({ worship: ["gil"] }));
+    expect(() => generate({ people, roles, dates: sundays(5), recent, rng: mulberry32(3) })).not.toThrow();
     expect(people).toEqual(PEOPLE);
   });
 

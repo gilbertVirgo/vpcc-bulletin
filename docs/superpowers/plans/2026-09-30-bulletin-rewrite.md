@@ -95,9 +95,10 @@ export function shortDate(iso: string): string; // "Sun 4 Oct"
 
 // src/shared/schedule.ts (T2)
 export const MAX_ATTEMPTS = 50;
-export function quota(frequency: number, weeks: number): number;
-export function planDates(coming: string, last: Week | null, count: number): { dates: string[]; history: Assignments | null };
-export type GenerateInput = { people: Person[]; roles: Role[]; dates: string[]; history?: Assignments | null; rng?: () => number };
+export const RECENT_WEEKS = 8;
+export function quota(frequency: number, weeks: number): number; // max(1, round(min(f,1) × weeks)); 0 when f ≤ 0 or weeks ≤ 0
+export function planDates(coming: string, stored: Week[], count: number): { dates: string[]; recent: Week[] };
+export type GenerateInput = { people: Person[]; roles: Role[]; dates: string[]; recent?: Week[]; rng?: () => number };
 export function generate(input: GenerateInput): GeneratedWeek[];
 
 // src/shared/rng.ts (T2)
@@ -777,7 +778,9 @@ git commit -m "Scaffold the Netlify rewrite: config, shared auth/http/mongo, dat
 - Consumes: `Role`, `Person`, `Assignments`, `Week`, `GeneratedWeek` from `src/shared/types.ts`; `addDays` from `src/shared/dates.ts`.
 - Produces: `MAX_ATTEMPTS`, `quota`, `planDates`, `GenerateInput`, `generate` (schedule.ts); `mulberry32` (rng.ts) — signatures in "Shared interfaces".
 
-Rules (from the spec): quota = `round(min(f,1) × weeks)` (0 when f ≤ 0 or weeks ≤ 0), counts weeks served and is a hard cap; roles in ascending `order`; candidate must hold the role, not be blocked, have quota left (or already serve this week), and not already be busy in any of the role's sections; blocked = held a `consecutiveDisabled` role the previous week (history for week 1); sort by `used/quota`, then served-previous-week last, then `rng()`; take `needs`; short cells stay partial and go in `gaps`; up to 50 attempts, stop at zero gaps, else keep the attempt with fewest gaps; never mutate inputs.
+Rules (from the spec): frequency is accounted over a rolling window = `recent` stored weeks (newest 8 before `dates[0]`) + the new dates, so repeated 1–2 week generations stay proportional. quota = `max(1, round(min(f,1) × window))` (0 when f ≤ 0), counts weeks served; `used` starts at the recent weeks each person served in. Roles in ascending `order`. Hard rules: holds the role, frequency > 0, not blocked, no clash with a section already taken this week. Blocked = held a `consecutiveDisabled` role the previous week; for week 1 that is the newest `recent` week **only if it is exactly 7 days before `dates[0]`** — `generate` checks this itself (same for the served-last-week ordering). Rank: within-quota (or already serving this week) before over-quota; then `used/quota` (over-quota: `used − quota`, least over first); then served-previous-week last; then `rng()`. Take `needs`. So quota is a cap that is only exceeded to avoid a gap; gaps remain only for true infeasibility and cells stay partial. Up to 50 attempts; stop at the first with zero gaps and zero quota overflows, else keep the best by (gaps, overflows). Never mutate inputs.
+
+**Status:** done — the committed `src/shared/{rng,schedule,schedule.test}.ts` are the source of truth; the code blocks below are the original T2 draft (single `history` week) and are superseded.
 
 - [ ] **Step 1: `src/shared/rng.ts`**
 
@@ -1110,7 +1113,7 @@ git commit -m "Add the pure, seeded rota scheduler with tests"
 - Create: `netlify/functions/weeks.mts`, `netlify/functions/people.mts`, `netlify/functions/generate.mts`
 
 **Interfaces:**
-- Consumes: `route`, `guarded`, `json`, `badRequest`, `notFound`, `readJson` (http.ts); `calendarDb` (mongo.ts); `ISO_DATE`, `isRealDate`, `isSunday`, `londonISO`, `nextSunday` (dates.ts); `generate`, `planDates` (schedule.ts); shared types.
+- Consumes: `route`, `guarded`, `json`, `badRequest`, `notFound`, `readJson` (http.ts); `calendarDb` (mongo.ts); `ISO_DATE`, `isRealDate`, `isSunday`, `londonISO`, `nextSunday` (dates.ts); `generate`, `planDates`, `RECENT_WEEKS` (schedule.ts); shared types.
 - Produces: the HTTP API table in "Shared interfaces", and:
 
 ```ts
@@ -1438,7 +1441,7 @@ export default route({
 
 ```ts
 import { nextSunday } from "../../src/shared/dates";
-import { generate, planDates } from "../../src/shared/schedule";
+import { generate, planDates, RECENT_WEEKS } from "../../src/shared/schedule";
 import { badRequest, guarded, json, readJson, route } from "./_shared/http";
 import { loadRolesAndPeople, rota, toWeek } from "./_shared/rota";
 import { weekCount } from "./_shared/validate";
@@ -1450,9 +1453,10 @@ export default route({
     if (!count.ok) return badRequest(count.error);
     const c = await rota();
     const { roles, people } = await loadRolesAndPeople(c);
-    const last = await c.weeks.find().sort({ date: -1 }).limit(1).next();
-    const { dates, history } = planDates(nextSunday(new Date()), last ? toWeek(last) : null, count.value);
-    return json({ weeks: generate({ people, roles, dates, history, rng: Math.random }) });
+    // Newest 8 stored weeks, past or future: frequency is accounted over them plus the new dates.
+    const stored = (await c.weeks.find().sort({ date: -1 }).limit(RECENT_WEEKS).toArray()).map(toWeek);
+    const { dates, recent } = planDates(nextSunday(new Date()), stored, count.value);
+    return json({ weeks: generate({ people, roles, dates, recent, rng: Math.random }) });
   }),
 });
 ```
@@ -3294,6 +3298,6 @@ git commit -m "Document local development, scripts and the Netlify deploy checkl
 
 ## Self-review notes
 
-- Spec coverage: auth (T1 http/me, T4 shell), data + indexes (T1 lib, T3 rota), validation (T3), every API row (T3), generation dates + history (T2 `planDates`, T3 generate), scheduler rules and fixes (T2), rota and people UI incl. skeleton, empty state, gaps, dialogs, mobile scroll (T4–T6), style tokens (T4), migration + dry-run + guard (T1 lib, T7), seed-dev (T1), env + calendar_dev (T1), README + deploy checklist (T8).
+- Spec coverage: auth (T1 http/me, T4 shell), data + indexes (T1 lib, T3 rota), validation (T3), every API row (T3), generation dates + recent weeks (T2 `planDates`, T3 generate), scheduler rules and fixes (T2), rota and people UI incl. skeleton, empty state, gaps, dialogs, mobile scroll (T4–T6), style tokens (T4), migration + dry-run + guard (T1 lib, T7), seed-dev (T1), env + calendar_dev (T1), README + deploy checklist (T8).
 - Type names are the ones in "Shared interfaces"; `rotaTable` is internal to T5.
 - Known ceiling marked in code: concurrent bulk saves can partially store a batch (`ponytail:` note in `weeks.mts`).

@@ -2,45 +2,54 @@ import { addDays } from "./dates";
 import type { Assignments, GeneratedWeek, Person, Role, Week } from "./types";
 
 export const MAX_ATTEMPTS = 50;
+/** Stored weeks counted towards frequency, on top of the weeks being generated. */
+export const RECENT_WEEKS = 8;
 
-/** Weeks a person may serve out of `weeks`. Hard cap. */
+/** Weeks a person should serve out of `weeks`. Anyone with frequency > 0 gets at least 1. */
 export function quota(frequency: number, weeks: number): number {
   if (!(frequency > 0) || !(weeks > 0)) return 0;
-  return Math.round(Math.min(frequency, 1) * weeks);
+  return Math.max(1, Math.round(Math.min(frequency, 1) * weeks));
 }
 
-/** Dates to generate and the stored week (if it is the Sunday before) to use as history. */
-export function planDates(
-  coming: string,
-  last: Week | null,
-  count: number,
-): { dates: string[]; history: Assignments | null } {
+const byDate = (weeks: Week[]) => [...weeks].sort((a, b) => a.date.localeCompare(b.date));
+
+/**
+ * Dates to generate after the stored weeks, and the stored weeks (newest 8, oldest first) to hand
+ * to `generate` as `recent`. `stored` may be in any order and include past weeks.
+ */
+export function planDates(coming: string, stored: Week[], count: number): { dates: string[]; recent: Week[] } {
+  const recent = byDate(stored).slice(-RECENT_WEEKS);
+  const last = recent.at(-1);
   const start = last && last.date >= coming ? addDays(last.date, 7) : coming;
-  const dates = Array.from({ length: count }, (_, i) => addDays(start, 7 * i));
-  const history = last && last.date === addDays(start, -7) ? last.assignments : null;
-  return { dates, history };
+  return { dates: Array.from({ length: count }, (_, i) => addDays(start, 7 * i)), recent };
 }
 
 export type GenerateInput = {
   people: Person[];
   roles: Role[];
-  dates: string[];
-  history?: Assignments | null;
+  dates: string[]; // consecutive Sundays, ascending
+  recent?: Week[]; // stored weeks before dates[0]; any order, newest 8 are used
   rng?: () => number;
 };
 
-export function generate({ people, roles, dates, history = null, rng = Math.random }: GenerateInput): GeneratedWeek[] {
+export function generate({ people, roles, dates, recent = [], rng = Math.random }: GenerateInput): GeneratedWeek[] {
+  if (dates.length === 0) return [];
   const ordered = [...roles].sort((a, b) => a.order - b.order);
+  const past = byDate(recent.filter((w) => w.date < dates[0])).slice(-RECENT_WEEKS);
+  // Last-week rules (consecutiveDisabled, served-last-week ordering) only when it really was last week.
+  const newest = past.at(-1);
+  const previous = newest && newest.date === addDays(dates[0], -7) ? newest.assignments : {};
+
   let best: GeneratedWeek[] = [];
-  let bestGaps = Infinity;
+  let bestScore = [Infinity, Infinity];
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const weeks = attempt(people, ordered, dates, history, rng);
+    const { weeks, overflow } = attempt(people, ordered, dates, past, previous, rng);
     const gaps = weeks.reduce((n, w) => n + w.gaps.length, 0);
-    if (gaps < bestGaps) {
+    if (gaps < bestScore[0] || (gaps === bestScore[0] && overflow < bestScore[1])) {
       best = weeks;
-      bestGaps = gaps;
+      bestScore = [gaps, overflow];
     }
-    if (gaps === 0) break;
+    if (gaps === 0 && overflow === 0) break;
   }
   return best;
 }
@@ -49,12 +58,14 @@ function attempt(
   people: Person[],
   roles: Role[],
   dates: string[],
-  history: Assignments | null,
+  past: Week[],
+  previous: Assignments,
   rng: () => number,
-): GeneratedWeek[] {
-  const quotas = new Map(people.map((p) => [p.id, quota(p.frequency, dates.length)]));
-  const used = new Map(people.map((p) => [p.id, 0]));
-  let previous: Assignments = history ?? {};
+): { weeks: GeneratedWeek[]; overflow: number } {
+  const window = past.length + dates.length;
+  const quotas = new Map(people.map((p) => [p.id, quota(p.frequency, window)]));
+  const used = new Map(people.map((p) => [p.id, past.filter((w) => Object.values(w.assignments).some((ids) => ids.includes(p.id))).length]));
+  let overflow = 0;
   const out: GeneratedWeek[] = [];
 
   for (const date of dates) {
@@ -65,31 +76,35 @@ function attempt(
     const gaps: string[] = [];
 
     for (const role of roles) {
+      // Hard rules: holds the role, frequency > 0, not blocked, no section clash.
+      // Quota is soft only as a last resort: over-quota people rank after everyone within quota.
       const ranked = people
         .filter(
           (p) =>
             p.roles.includes(role.id) &&
+            quotas.get(p.id)! > 0 &&
             !blocked.has(p.id) &&
-            (busy.has(p.id) || used.get(p.id)! < quotas.get(p.id)!) &&
             !role.busyFor.some((s) => busy.get(p.id)?.has(s)),
         )
-        .map((p) => ({
-          id: p.id,
-          ratio: used.get(p.id)! / quotas.get(p.id)!,
-          last: servedLastWeek.has(p.id) ? 1 : 0,
-          tie: rng(),
-        }))
-        .sort((a, b) => a.ratio - b.ratio || a.last - b.last || a.tie - b.tie);
+        .map((p) => {
+          const u = used.get(p.id)!, q = quotas.get(p.id)!;
+          const over = !busy.has(p.id) && u >= q;
+          return { id: p.id, over: over ? 1 : 0, fair: over ? u - q : u / q, last: servedLastWeek.has(p.id) ? 1 : 0, tie: rng() };
+        })
+        .sort((a, b) => a.over - b.over || a.fair - b.fair || a.last - b.last || a.tie - b.tie);
 
-      const chosen = ranked.slice(0, role.needs).map((c) => c.id);
+      const chosen = ranked.slice(0, role.needs);
       if (chosen.length < role.needs) gaps.push(role.id);
-      for (const id of chosen) busy.set(id, new Set([...(busy.get(id) ?? []), ...role.busyFor]));
-      assignments[role.id] = chosen;
+      for (const c of chosen) {
+        overflow += c.over;
+        busy.set(c.id, new Set([...(busy.get(c.id) ?? []), ...role.busyFor]));
+      }
+      assignments[role.id] = chosen.map((c) => c.id);
     }
 
     for (const id of busy.keys()) used.set(id, used.get(id)! + 1);
     out.push({ date, assignments, gaps });
     previous = assignments;
   }
-  return out;
+  return { weeks: out, overflow };
 }
