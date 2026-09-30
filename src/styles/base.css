@@ -1,0 +1,82 @@
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	/* Offset for the sticky header when jumping to an anchor (skip link). */
+	scroll-padding-top: calc(var(--spacing) * 20);
+}
+
+body {
+	margin: 0;
+	background-color: var(--color-surface);
+	color: var(--color-ink);
+	font-family: var(--font-sans);
+	font-size: var(--text-body);
+	font-weight: var(--font-weight-medium);
+	line-height: 1.65;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+	font-synthesis-weight: none;
+	font-synthesis-style: none;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0;
+	font-weight: var(--font-weight-bold);
+	text-wrap: balance;
+}
+
+/* App pages: the h2 step reads as a page title without v1's marketing-sized h1. */
+h1 {
+	font-size: var(--text-h2);
+	line-height: var(--text-h2--line-height);
+	letter-spacing: var(--text-h2--letter-spacing);
+}
+
+p {
+	margin: 0;
+	text-wrap: pretty;
+}
+
+img,
+svg {
+	display: block;
+	max-width: 100%;
+}
+
+input,
+button,
+textarea,
+select {
+	font: inherit;
+	color: inherit;
+	letter-spacing: inherit;
+}
+
+a {
+	color: var(--color-ink-accent);
+	text-underline-offset: 0.15em;
+}
+
+/* Visible for keyboard users, invisible for mouse users. Never remove without replacing. */
+:focus-visible {
+	outline: 2px solid var(--color-focus-ring);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
+::selection {
+	background-color: var(--color-accent);
+	color: var(--color-accent-contrast);
+}
