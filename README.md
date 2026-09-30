@@ -25,16 +25,15 @@ and `GOOGLE_SHEET_ID` (migration only). `../vpcc-auth/.env` needs the same
 
 ```bash
 npm install
-npm run seed:dev     # roles, people, indexes and the test user in calendar_dev (refuses any other DB)
+npm run seed:dev     # roles, missing people, indexes and the test user in calendar_dev (refuses any other DB)
 (cd ../vpcc-auth && npx netlify dev --port 8888 --no-open)                               # auth hub
 node --env-file-if-exists=.env "$(command -v netlify)" dev --port 8890 --no-open \
   --functions "$PWD/netlify/functions"                                                   # bulletin → http://localhost:8890
 ```
 
-From the main checkout plain `npx netlify dev --port 8890` also works. From a git
-worktree it does not: netlify-cli resolves the project root to the main checkout, so
-the command above loads `.env` itself and points at this tree's functions (it is the
-`bulletin` entry in `.claude/launch.json`).
+The bulletin command loads `.env` itself and points netlify-cli at this tree's
+functions, because from a git worktree netlify-cli resolves the project root to the
+main checkout (it is the `bulletin` entry in `.claude/launch.json`).
 
 Sign in as the `general` test user: username `DEV_TEST_USERNAME`, password
 `DEV_TEST_PASSWORD`, both in `.env`.
@@ -51,11 +50,13 @@ npm run build        # typecheck + production build into dist/
 
 `scripts/migrate.ts` imports roles and people from `~/rota-scheduler/data`
 (`--data <dir>` to override) and the future rows of the Google Sheet "Sundays" tab.
-It is idempotent: roles upsert by id, people by name, weeks by date (the sheet wins).
-Nothing is ever deleted; DB people not in the source are reported as "kept, not in source".
+It is idempotent and safe to re-run after launch: roles are upserted by id, but people
+(by name) and weeks (by date) are only inserted when missing, so edits made in the app
+are never overwritten. Nothing is ever deleted. People and weeks already in the DB, and
+anything in the DB but not in the source, are reported as "kept".
 
 ```bash
-npm run migrate -- --dry-run      # read-only diff against the target DB: insert / update (fields) / unchanged / kept
+npm run migrate -- --dry-run      # read-only diff against the target DB: insert / update (fields, roles only) / unchanged / kept
 npm run migrate                   # writes; refuses a DB not ending in _dev
 CALENDAR_MONGODB_URI='<production uri>' npm run migrate -- --dry-run
 CALENDAR_MONGODB_URI='<production uri>' npm run migrate -- --production
@@ -85,4 +86,5 @@ Unmatched names are listed as skipped; add spellings to `ROLE_ALIASES` /
 4. Check the auth hub's `returnTo` / CORS allowlist covers the new hostname.
 5. MongoDB Atlas network access must allow Netlify (same rule as the calendar).
 6. Import production data once (dry run first, then `--production`, as above). The
-   real run also creates the unique index on `rota_weeks.date`.
+   real run also creates the unique index on `rota_weeks.date` (the app ensures it too,
+   before its first save of generated weeks).

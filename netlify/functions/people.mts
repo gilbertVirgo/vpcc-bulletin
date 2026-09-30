@@ -38,19 +38,22 @@ export default route({
     return doc ? json({ person: toPerson(doc) }) : notFound("No such person");
   }),
 
-  /** Also takes them off every week from today on; past weeks are left as they were. */
+  /**
+   * Also takes them off every week from today on; past weeks are left as they were. Weeks first,
+   * so a retry after a failure part-way still clears them (a repeat for a deleted id is a 404).
+   */
   DELETE: guarded(async (_req, url) => {
     const id = objectId(url.searchParams.get("id"));
     if (!id) return badRequest("id required");
     const c = await rota();
     const { roles } = await loadRolesAndPeople(c);
-    const { deletedCount } = await c.people.deleteOne({ _id: new ObjectId(id) });
-    if (!deletedCount) return notFound("No such person");
     const pull = Object.fromEntries(roles.map((r) => [`assignments.${r.id}`, id]));
     const { modifiedCount } = await c.weeks.updateMany(
       { date: { $gte: londonISO(new Date()) } },
       { $pull: pull } as UpdateFilter<WeekDoc>,
     );
+    const { deletedCount } = await c.people.deleteOne({ _id: new ObjectId(id) });
+    if (!deletedCount) return notFound("No such person");
     return json({ ok: true, weeksUpdated: modifiedCount });
   }),
 });

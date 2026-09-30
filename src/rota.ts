@@ -60,8 +60,10 @@ function render(): void {
 }
 
 function editCell(week: Week, role: Role): void {
-  const holders = people.filter((p) => p.roles.includes(role.id));
   const current = new Set(week.assignments[role.id] ?? []);
+  // Whoever is already in the cell stays listed even if they no longer hold the role, so saving keeps them.
+  const holders = people.filter((p) => p.roles.includes(role.id) || current.has(p.id));
+  const label = (p: Person) => (p.roles.includes(role.id) ? p.name : `${p.name} (no longer does this role)`);
   const error = h("p", { class: "error", role: "alert" });
   const boxes = holders.map((p) =>
     h("input", { type: "checkbox", id: `pick-${p.id}`, value: p.id, checked: current.has(p.id) }),
@@ -82,7 +84,7 @@ function editCell(week: Week, role: Role): void {
       { class: "fieldset" },
       h("legend", { class: "field__label" }, role.needs === 1 ? "Choose one person" : `Choose up to ${role.needs} people`),
       ...(holders.length
-        ? holders.map((p, i) => h("div", { class: "check" }, boxes[i], h("label", { for: `pick-${p.id}` }, p.name)))
+        ? holders.map((p, i) => h("div", { class: "check" }, boxes[i], h("label", { for: `pick-${p.id}` }, label(p))))
         : [h("p", { class: "status" }, "Nobody does this role yet. Add it to someone on the People page.")]),
     ),
     error,

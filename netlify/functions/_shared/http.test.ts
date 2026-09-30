@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { guarded, readJson, route } from "./http";
+import { guarded, route } from "./http";
 
 const SECRET = "test-secret";
 const cookie = () => `vpcc_session=${jwt.sign({ id: "1", username: "tester", role: "general" }, SECRET)}`;
@@ -54,12 +54,5 @@ describe("guarded", () => {
   it("runs the handler for a JSON write with a session", async () => {
     const res = await handler(req("POST", { cookie: cookie(), "content-type": "application/json" }, "{}"));
     expect(res.status).toBe(200);
-  });
-});
-
-describe("readJson", () => {
-  it("parses JSON and returns undefined for junk", async () => {
-    expect(await readJson(req("POST", {}, '{"a":1}'))).toEqual({ a: 1 });
-    expect(await readJson(req("POST", {}, "{nope"))).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-// One-off, idempotent import into the calendar DB named by CALENDAR_MONGODB_URI.
+// Idempotent import (roles updated; people and weeks only inserted, so app edits survive a re-run) into the calendar DB named by CALENDAR_MONGODB_URI.
 //   npm run migrate -- --dry-run                         read-only: diff against the target DB, writes nothing
 //   npm run migrate                                      write to a *_dev DB
 //   CALENDAR_MONGODB_URI='<prod>' npm run migrate -- --production
@@ -10,7 +10,7 @@ import type { Db } from "mongodb";
 import { londonISO } from "../src/shared/dates.ts";
 import {
   type Diff, type Doc, argValue, assertWritable, connect, dbName, diffDocs, ensureIndexes, loadSchedulerData,
-  personDocs, roleDocs, upsertRolesAndPeople,
+  personDocs, roleDocs, upsertRolesAndPeople, upserts,
 } from "./lib.ts";
 import { type SheetWeek, flipSheet } from "./sheet.ts";
 
@@ -46,11 +46,11 @@ const personIds = (people: Doc[]) => new Map(people.map((p) => [String(p.name), 
 
 function printDiff(collection: string, d: Diff): void {
   console.log(
-    `${collection}: ${d.insert.length} insert, ${d.update.length} update, ${d.unchanged.length} unchanged, ${d.kept.length} kept (not in source)`,
+    `${collection}: ${d.insert.length} insert, ${d.update.length} update, ${d.unchanged.length} unchanged, ${d.kept.length} kept (left untouched)`,
   );
   for (const k of d.insert) console.log(`  + ${k}`);
   for (const u of d.update) console.log(`  ~ ${u.key}: ${u.fields.join(", ")}`);
-  for (const k of d.kept) console.log(`  = ${k} (kept, not in source)`);
+  for (const k of d.kept) console.log(`  = ${k} (kept)`);
 }
 
 /** Dry run: reads only. No assertWritable here on purpose — this path has no write calls, so any DB is safe. */
@@ -59,8 +59,8 @@ async function dryRun(db: Db, data: Awaited<ReturnType<typeof loadSchedulerData>
   const [roles, people, stored] = await Promise.all([read("rota_roles"), read("rota_people"), read("rota_weeks")]);
   console.log(`Dry run against ${db.databaseName} (read-only):`);
   printDiff("rota_roles", diffDocs(roles, roleDocs(data.roles), "_id"));
-  printDiff("rota_people", diffDocs(people, personDocs(data.people), "name"));
-  printDiff("rota_weeks", diffDocs(stored, weekDocs(weeks, personIds(people)), "date"));
+  printDiff("rota_people", diffDocs(people, personDocs(data.people), "name", true));
+  printDiff("rota_weeks", diffDocs(stored, weekDocs(weeks, personIds(people)), "date", true));
   console.log("Dry run: nothing written.");
 }
 
@@ -68,10 +68,12 @@ async function write(db: Db, data: Awaited<ReturnType<typeof loadSchedulerData>>
   await ensureIndexes(db);
   await upsertRolesAndPeople(db, data);
   const ids = personIds(await db.collection<Doc>("rota_people").find().toArray());
-  for (const { date, assignments } of weekDocs(weeks, ids)) {
-    await db.collection("rota_weeks").updateOne({ date }, { $set: { assignments } }, { upsert: true });
-  }
-  console.log(`Wrote to ${db.databaseName}: ${data.roles.length} roles, ${data.people.length} people, ${weeks.length} week(s).`);
+  const docs = weekDocs(weeks, ids);
+  if (docs.length) await db.collection<Doc>("rota_weeks").bulkWrite(upserts(docs, "date", true));
+  console.log(
+    `Wrote to ${db.databaseName}: ${data.roles.length} roles upserted; of ${data.people.length} people and ${weeks.length} week(s), ` +
+      "only those not already in the DB were inserted (run --dry-run to see which are kept).",
+  );
 }
 
 const argv = process.argv.slice(2);

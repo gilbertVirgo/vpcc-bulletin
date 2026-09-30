@@ -58,19 +58,23 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 - Service sections: `0` pre-service, `1` during, `2` post-service.
 - Person ids inside `assignments` are 24-char hex strings, not ObjectIds.
 - Stored weeks always carry a key for every role id (empty array when unfilled).
-- The unique index is created by the scripts (`ensureIndexes`), not at runtime.
+- The unique index is created by the scripts (`ensureIndexes`) and also ensured by
+  `POST /api/weeks` once per warm function instance before its first insert, so the
+  duplicate-key backstop always exists.
 - "Today" is the Europe/London calendar date.
 
 ## Validation (at the function boundary)
 
 - `date`: `YYYY-MM-DD`, a real calendar date, a Sunday; for writes also `>= today`.
-- Role ids must exist. Person ids must be 24-hex, exist, and hold the role.
+- Role ids must exist. Person ids must be 24-hex, exist, and hold the role — except
+  that a cell edit may keep someone already in that stored cell who no longer holds it.
 - A cell: array of unique person ids, length `0..needs`.
 - Manual cell edits skip the section-clash and consecutive rules — a human
   override is trusted.
 - Person: `name` trimmed, 1–60 chars, unique (exact match, 409 on clash);
   `roles` unique known role ids (may be empty); `frequency` finite, `0..1`.
-- Generate: `weeks` integer 1–5. Bulk save: 1–5 weeks, unique dates.
+- Generate: `weeks` integer 1–5. Bulk save: 1–5 weeks, unique dates, each one of
+  `planDates(coming, stored, 5)` (the next 5 unfilled Sundays), else 400.
 - Malformed JSON → 400. User data is only ever put into the DOM via
   `textContent`/attributes, never `innerHTML`.
 
@@ -80,7 +84,7 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 |---|---|---|---|---|
 | GET | `/api/me` | public | – | `{ user, hub }` |
 | GET | `/api/weeks` | public | – | `{ roles: Role[], people: {id,name}[], weeks: Week[] }` (weeks `>= today`, ascending) |
-| POST | `/api/weeks` | guarded | `{ weeks: Week[] }` | 201 `{ weeks }`; 409 `{ error, dates }` if any date exists (nothing stored) |
+| POST | `/api/weeks` | guarded | `{ weeks: Week[] }` | 201 `{ weeks }`; 409 `{ error, dates }` if any date exists (nothing stored); 400 if a date is not among the next 5 unfilled Sundays |
 | PUT | `/api/weeks?date=D` | guarded | `{ roleId, personIds }` | `{ week }`; 404 if no such week |
 | DELETE | `/api/weeks?date=D` | guarded | – | `{ ok: true }`; 404 |
 | POST | `/api/generate` | guarded | `{ weeks: 1..5 }` | `{ weeks: GeneratedWeek[] }` — stores nothing |
@@ -92,21 +96,23 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 Errors are `{ error: string }` with 400/401/404/405/409/415/500. 500s hide detail.
 
 Deleting a person pulls their id from every role in weeks dated `>= today`;
-past weeks are left alone. Editing a person's roles does not rewrite existing
+past weeks are left alone. The weeks are cleaned before the person is deleted, so a
+retry after a failure part-way finishes the job (a repeat for a gone id is still 404). Editing a person's roles does not rewrite existing
 weeks.
 
 ### Generation dates
 
-`coming = nextSunday(now)` (today if today is Sunday). `last` = latest stored week.
-`start = last && last.date >= coming ? last.date + 7 : coming`. Dates are
-`start, start+7, …` for the requested count. The newest 8 stored weeks (past or
-future) are passed to the scheduler as `recent`.
+`coming = nextSunday(now)` (today if today is Sunday). Dates are the first `count`
+Sundays from `coming` on with no stored week, so a deleted week in the middle is
+refilled. The server passes every stored week from `coming` on plus the newest 8
+before it to the scheduler as `recent`.
 
 ## Scheduler
 
 Pure `generate({ people, roles, dates, recent, rng }) → GeneratedWeek[]` in
 `src/shared/schedule.ts`; `GeneratedWeek = Week & { gaps: string[] }` (role ids
-left short). `planDates(coming, stored, count) → { dates, recent }`.
+left short). `planDates(coming, stored, count) → string[]`. Dates are ascending
+Sundays but need not be consecutive.
 
 - Frequency is accounted over a rolling window: `recent` (the newest 8 stored
   weeks before the first new date) plus the new dates. Users often generate 1–2
@@ -118,9 +124,11 @@ left short). `planDates(coming, stored, count) → { dates, recent }`.
 - Hard rules for a candidate: holds the role; frequency > 0; not blocked; none of
   the role's `busyFor` sections already taken this week.
 - Blocked: anyone who held a `consecutiveDisabled` role in the previous week — blocked
-  from every role that week. For week 1 the previous week is the newest `recent`
-  week only when it is exactly 7 days before the first date; `generate` checks
-  this itself. The same applies to the served-last-week ordering.
+  from every role that week. The previous week is the week exactly 7 days before the
+  date, generated in this run or stored; with neither there is no previous week. The
+  same week drives the served-last-week ordering.
+- Next week: when the week 7 days after the date is stored, nobody serving in it may
+  take a `consecutiveDisabled` role (that would block them from the week they serve).
 - Order: people within quota (or already serving this week) first, by `used/quota`;
   then over-quota people, least over first. Ties: "served previous week" last, then
   a random key from `rng`. Top `needs` are taken. Quota is thus a cap, exceeded only
@@ -150,7 +158,8 @@ and Login link or username + Logout.
 - Loading: 4 skeleton rows. Empty: "No Sundays on the rota yet." Load error:
   `role="alert"` message.
 - Signed in: each cell is a button opening an edit `<dialog>` with a checkbox per
-  person holding the role; once `needs` are checked the rest disable. Save → PUT.
+  person holding the role, plus anyone already in the cell who no longer holds it
+  (labelled "no longer does this role"); once `needs` are checked the rest disable. Save → PUT.
   Each row ends with a danger "Delete" button → confirm `<dialog>` → DELETE.
   (Native `<dialog>` rather than `window.confirm`, which blocks browser automation.)
 - Generate button → `<dialog>`: number input 1–5 (default 4), Generate, preview
@@ -183,12 +192,13 @@ Target DB = `CALENDAR_MONGODB_URI`. Every write path calls `assertWritable(uri, 
 refuses unless the DB name ends in `_dev` or `--production` is passed.
 `seed-dev` refuses non-`_dev` even with `--production`.
 
-- `scripts/seed-dev.ts` — upserts roles + people from rota-scheduler data,
+- `scripts/seed-dev.ts` — upserts roles and inserts missing people from rota-scheduler data,
   upserts a `general` test user (`DEV_TEST_USERNAME` / `DEV_TEST_PASSWORD` from
   `.env`, bcrypt cost 10), ensures indexes.
 - `scripts/migrate.ts [--dry-run] [--production] [--data <dir>] [--credentials <file>]`
   - (a) roles (`_id` = scheduler id, `order` = array index) upserted by `_id`;
-    people upserted by `name`. Data dir defaults to `~/rota-scheduler/data`.
+    people inserted by `name` only when missing (`$setOnInsert`; existing people are
+    kept as edited in the app). Data dir defaults to `~/rota-scheduler/data`.
   - (b) Sheet "Sundays": header row; column named "Date" parsed as `D MMMM YYYY`;
     columns 0 and 1 ignored (as the old app did); other headers are person
     names, cell = role name(s), comma-separated. Rows dated `>= today` only.
@@ -197,7 +207,8 @@ refuses unless the DB name ends in `_dev` or `--production` is passed.
     (`"worship lead" → worship`, `"away" → ignored`) and an empty `PERSON_ALIASES`.
     Skipped and reported: unknown person, unknown role, non-Sunday / unparseable
     date, person not holding the role, extras beyond `needs`.
-    Weeks upserted by `date` (sheet wins over any existing row for that date).
+    Weeks inserted by `date` only when missing (`$setOnInsert`; an existing week is
+    kept as edited in the app). The dry run reports existing people and weeks as "kept".
   - Sheet step is skipped with a printed notice when the credentials file or
     `GOOGLE_SHEET_ID` is missing. Zero future rows is a valid result.
   - `--dry-run` never connects to Mongo; it prints the same report.

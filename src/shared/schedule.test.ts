@@ -69,28 +69,16 @@ describe("quota", () => {
 
 describe("planDates", () => {
   const coming = "2026-10-04";
-  const wk = (date: string): Week => ({ date, assignments: { worship: ["gil"] } });
+  const at = (...dates: string[]) => dates.map((date) => ({ date }));
   it("starts at the coming Sunday when nothing is stored", () => {
-    expect(planDates(coming, [], 3)).toEqual({ dates: ["2026-10-04", "2026-10-11", "2026-10-18"], recent: [] });
+    expect(planDates(coming, [], 3)).toEqual(["2026-10-04", "2026-10-11", "2026-10-18"]);
   });
-  it("continues after the last future week, returning stored weeks oldest first", () => {
-    expect(planDates(coming, [wk("2026-10-18"), wk("2026-10-11")], 1)).toEqual({
-      dates: ["2026-10-25"],
-      recent: [wk("2026-10-11"), wk("2026-10-18")],
-    });
-    expect(planDates(coming, [wk(coming)], 1)).toEqual({ dates: ["2026-10-11"], recent: [wk(coming)] });
+  it("takes the next Sundays with no stored week, refilling a deleted middle week", () => {
+    expect(planDates(coming, at("2026-10-18", coming), 3)).toEqual(["2026-10-11", "2026-10-25", "2026-11-01"]);
+    expect(planDates(coming, at(coming, "2026-10-11"), 1)).toEqual(["2026-10-18"]);
   });
-  it("starts at the coming Sunday after past weeks and keeps them for frequency", () => {
-    expect(planDates(coming, [wk("2026-09-13"), wk("2026-09-27")], 2)).toEqual({
-      dates: [coming, "2026-10-11"],
-      recent: [wk("2026-09-13"), wk("2026-09-27")],
-    });
-  });
-  it("keeps at most the newest 8 weeks", () => {
-    const stored = Array.from({ length: 10 }, (_, i) => wk(addDays("2026-07-26", 7 * i)));
-    const { dates, recent } = planDates(coming, stored, 1);
-    expect(dates).toEqual([coming]);
-    expect(recent).toEqual(stored.slice(2));
+  it("ignores past weeks", () => {
+    expect(planDates(coming, at("2026-09-13", "2026-09-27"), 2)).toEqual([coming, "2026-10-11"]);
   });
 });
 
@@ -168,6 +156,37 @@ describe("generate", () => {
     expect(run(addDays(LAST_SUNDAY, -7))).toMatchObject({ assignments: { lead: ["a"] }, gaps: [] });
     // Recent weeks on or after the first new date are ignored entirely.
     expect(run("2026-10-04")).toMatchObject({ assignments: { lead: ["a"] }, gaps: [] });
+  });
+
+  it("takes last-week rules from the week 7 days before each date, stored or generated", () => {
+    const people = [person("a", ["lead"]), person("b", ["lead"]), person("c", ["lead"])];
+    const roles = [role("lead", [PRE], { consecutiveDisabled: true })];
+    const recent: Week[] = [
+      { date: "2026-10-04", assignments: { lead: ["a"] } },
+      { date: "2026-10-18", assignments: { lead: ["b"] } },
+    ];
+    for (const seed of SEEDS) {
+      const [gap, after] = generate({ people, roles, dates: ["2026-10-11", "2026-10-25"], recent, rng: mulberry32(seed) });
+      expect(gap.assignments.lead).toEqual(["c"]); // a led the week before, b leads the week after
+      expect(after.assignments.lead).not.toContain("b"); // stored 18 Oct, not generated 11 Oct, is its last week
+    }
+  });
+
+  it("does not carry last-week rules across a Sunday that is not being generated", () => {
+    const people = [person("a", ["lead"])];
+    const roles = [role("lead", [PRE], { consecutiveDisabled: true })];
+    const weeks = generate({ people, roles, dates: ["2026-10-04", "2026-10-18"], rng: mulberry32(1) });
+    expect(weeks.map((w) => w.assignments.lead)).toEqual([["a"], ["a"]]);
+  });
+
+  it("keeps consecutive roles from anyone serving in the stored week after a gap", () => {
+    const people = [person("a", ["lead", "other"]), person("b", ["lead"])];
+    const roles = [role("lead", [PRE], { consecutiveDisabled: true }), role("other", [POST], { order: 1 })];
+    const recent: Week[] = [{ date: "2026-10-11", assignments: { lead: ["a"], other: [] } }];
+    for (const seed of SEEDS) {
+      const [w] = generate({ people, roles, dates: ["2026-10-04"], recent, rng: mulberry32(seed) });
+      expect(w.assignments).toEqual({ lead: ["b"], other: ["a"] });
+    }
   });
 
   it("counts recent weeks towards quota", () => {

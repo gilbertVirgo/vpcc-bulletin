@@ -38,7 +38,8 @@ export function personInput(body: unknown, roles: Role[]): Result<PersonInput> {
   return ok({ name, roles: list as string[], frequency: f });
 }
 
-export function cell(roleId: unknown, personIds: unknown, roles: Role[], people: Person[]): Result<string[]> {
+/** `stored` is the cell as saved: people in it may stay after they stop holding the role. */
+export function cell(roleId: unknown, personIds: unknown, roles: Role[], people: Person[], stored: string[] = []): Result<string[]> {
   const role = roles.find((r) => r.id === roleId);
   if (!role) return fail(`Unknown role ${String(roleId)}`);
   if (!Array.isArray(personIds) || personIds.length > role.needs || new Set(personIds).size !== personIds.length) {
@@ -47,18 +48,21 @@ export function cell(roleId: unknown, personIds: unknown, roles: Role[], people:
   for (const id of personIds) {
     const p = typeof id === "string" && OBJECT_ID.test(id) ? people.find((x) => x.id === id) : undefined;
     if (!p) return fail(`Unknown person ${String(id)}`);
-    if (!p.roles.includes(role.id)) return fail(`${p.name} does not do ${role.name}`);
+    if (!p.roles.includes(role.id) && !stored.includes(p.id)) return fail(`${p.name} does not do ${role.name}`);
   }
   return ok(personIds as string[]);
 }
 
-export function cellBody(body: unknown, roles: Role[], people: Person[]): Result<{ roleId: string; personIds: string[] }> {
+export function cellBody(
+  body: unknown, roles: Role[], people: Person[], stored: Assignments = {},
+): Result<{ roleId: string; personIds: string[] }> {
   if (!isObj(body)) return fail("Expected a JSON object");
-  const c = cell(body.roleId, body.personIds, roles, people);
+  const saved = typeof body.roleId === "string" && Object.hasOwn(stored, body.roleId) ? stored[body.roleId] : [];
+  const c = cell(body.roleId, body.personIds, roles, people, saved);
   return c.ok ? ok({ roleId: body.roleId as string, personIds: c.value }) : c;
 }
 
-/** 1–5 unique future Sundays; every role key present in the result. */
+/** 1–5 unique future Sundays; every role key present in the result. Every person must hold the role. */
 export function weeksBody(body: unknown, roles: Role[], people: Person[], today: string): Result<Week[]> {
   const list = isObj(body) ? body.weeks : undefined;
   if (!Array.isArray(list) || list.length < 1 || list.length > 5) return fail("weeks must be a list of 1 to 5 weeks");

@@ -80,12 +80,17 @@ describe("cell", () => {
     expect(cell("worship", [TOM], ROLES, PEOPLE)).toEqual({ ok: false, error: "Tom does not do Worship" });
     expect(cell("welcome", "x", ROLES, PEOPLE).ok).toBe(false);
   });
+  it("keeps someone who no longer holds the role only when they are already in the stored cell", () => {
+    expect(cell("worship", [TOM], ROLES, PEOPLE, [TOM])).toEqual({ ok: true, value: [TOM] });
+    expect(cell("worship", [TOM], ROLES, PEOPLE, [GIL])).toEqual({ ok: false, error: "Tom does not do Worship" });
+  });
   it("cellBody wraps cell", () => {
     expect(cellBody({ roleId: "worship", personIds: [GIL] }, ROLES, PEOPLE)).toEqual({
       ok: true,
       value: { roleId: "worship", personIds: [GIL] },
     });
     expect(cellBody("nope", ROLES, PEOPLE).ok).toBe(false);
+    expect(cellBody({ roleId: "worship", personIds: [TOM] }, ROLES, PEOPLE, { worship: [TOM] }).ok).toBe(true);
   });
 });
 

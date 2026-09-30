@@ -60,12 +60,15 @@ export type Diff = {
   insert: string[];
   update: { key: string; fields: string[] }[];
   unchanged: string[];
-  /** In the DB but not in the source: left alone, never deleted. */
+  /** Left untouched: in the DB but not in the source, or (insert-only) already in the DB. Never deleted. */
   kept: string[];
 };
 
-/** What upserting `desired` by `key` would do to `current`. Only desired fields are compared. */
-export function diffDocs(current: Doc[], desired: Doc[], key: string): Diff {
+/**
+ * What upserting `desired` by `key` would do to `current`. Only desired fields are compared.
+ * `insertOnly`: docs already in the DB are kept as they are, never updated.
+ */
+export function diffDocs(current: Doc[], desired: Doc[], key: string, insertOnly = false): Diff {
   const byKey = new Map(current.map((d) => [String(d[key]), d]));
   const diff: Diff = { insert: [], update: [], unchanged: [], kept: [] };
   for (const d of desired) {
@@ -75,19 +78,24 @@ export function diffDocs(current: Doc[], desired: Doc[], key: string): Diff {
       diff.insert.push(k);
       continue;
     }
+    if (insertOnly) continue;
     const fields = Object.keys(d).filter((f) => f !== key && !isDeepStrictEqual(d[f], have[f]));
     if (fields.length) diff.update.push({ key: k, fields });
     else diff.unchanged.push(k);
   }
   const wanted = new Set(desired.map((d) => String(d[key])));
-  diff.kept = [...byKey.keys()].filter((k) => !wanted.has(k));
+  diff.kept = [...byKey.keys()].filter((k) => insertOnly || !wanted.has(k));
   return diff;
 }
 
-/** Roles keyed by scheduler id; people keyed by name. Idempotent. */
+/** bulkWrite upserts matched by `key`; `insertOnly` leaves docs that already exist untouched. */
+export const upserts = (docs: Doc[], key: string, insertOnly = false) =>
+  docs.map(({ [key]: k, ...rest }) => ({
+    updateOne: { filter: { [key]: k }, update: insertOnly ? { $setOnInsert: rest } : { $set: rest }, upsert: true },
+  }));
+
+/** Roles upserted by scheduler id; people inserted by name, so edits made in the app survive a re-run. */
 export async function upsertRolesAndPeople(db: Db, data: { roles: SeedRole[]; people: SeedPerson[] }): Promise<void> {
-  const upserts = (docs: Doc[], key: string) =>
-    docs.map(({ [key]: k, ...rest }) => ({ updateOne: { filter: { [key]: k }, update: { $set: rest }, upsert: true } }));
   if (data.roles.length) await db.collection<Doc>("rota_roles").bulkWrite(upserts(roleDocs(data.roles), "_id"));
-  if (data.people.length) await db.collection<Doc>("rota_people").bulkWrite(upserts(personDocs(data.people), "name"));
+  if (data.people.length) await db.collection<Doc>("rota_people").bulkWrite(upserts(personDocs(data.people), "name", true));
 }

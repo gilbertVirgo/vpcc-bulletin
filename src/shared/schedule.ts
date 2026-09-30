@@ -13,22 +13,23 @@ export function quota(frequency: number, weeks: number): number {
 
 const byDate = (weeks: Week[]) => [...weeks].sort((a, b) => a.date.localeCompare(b.date));
 
-/**
- * Dates to generate after the stored weeks, and the stored weeks (newest 8, oldest first) to hand
- * to `generate` as `recent`. `stored` may be in any order and include past weeks.
- */
-export function planDates(coming: string, stored: Week[], count: number): { dates: string[]; recent: Week[] } {
-  const recent = byDate(stored).slice(-RECENT_WEEKS);
-  const last = recent.at(-1);
-  const start = last && last.date >= coming ? addDays(last.date, 7) : coming;
-  return { dates: Array.from({ length: count }, (_, i) => addDays(start, 7 * i)), recent };
+/** The first `count` Sundays from `coming` on that have no stored week, so a deleted week gets refilled. */
+export function planDates(coming: string, stored: { date: string }[], count: number): string[] {
+  const taken = new Set(stored.map((w) => w.date));
+  const dates: string[] = [];
+  for (let d = coming; dates.length < count; d = addDays(d, 7)) if (!taken.has(d)) dates.push(d);
+  return dates;
 }
 
 export type GenerateInput = {
   people: Person[];
   roles: Role[];
-  dates: string[]; // consecutive Sundays, ascending
-  recent?: Week[]; // stored weeks before dates[0]; any order, newest 8 are used
+  dates: string[]; // Sundays, ascending, none of them stored
+  /**
+   * Stored weeks, any order. The newest 8 before dates[0] count towards frequency; a stored week
+   * exactly 7 days before or after a date drives the last-week and next-week rules for it.
+   */
+  recent?: Week[];
   rng?: () => number;
 };
 
@@ -36,14 +37,12 @@ export function generate({ people, roles, dates, recent = [], rng = Math.random 
   if (dates.length === 0) return [];
   const ordered = [...roles].sort((a, b) => a.order - b.order);
   const past = byDate(recent.filter((w) => w.date < dates[0])).slice(-RECENT_WEEKS);
-  // Last-week rules (consecutiveDisabled, served-last-week ordering) only when it really was last week.
-  const newest = past.at(-1);
-  const previous = newest && newest.date === addDays(dates[0], -7) ? newest.assignments : {};
+  const stored = new Map(recent.map((w) => [w.date, w.assignments]));
 
   let best: GeneratedWeek[] = [];
   let bestScore = [Infinity, Infinity];
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const { weeks, overflow } = attempt(people, ordered, dates, past, previous, rng);
+    const { weeks, overflow } = attempt(people, ordered, dates, past, stored, rng);
     const gaps = weeks.reduce((n, w) => n + w.gaps.length, 0);
     if (gaps < bestScore[0] || (gaps === bestScore[0] && overflow < bestScore[1])) {
       best = weeks;
@@ -59,7 +58,7 @@ function attempt(
   roles: Role[],
   dates: string[],
   past: Week[],
-  previous: Assignments,
+  stored: Map<string, Assignments>,
   rng: () => number,
 ): { weeks: GeneratedWeek[]; overflow: number } {
   const window = past.length + dates.length;
@@ -67,16 +66,21 @@ function attempt(
   const used = new Map(people.map((p) => [p.id, past.filter((w) => Object.values(w.assignments).some((ids) => ids.includes(p.id))).length]));
   let overflow = 0;
   const out: GeneratedWeek[] = [];
+  const made = new Map<string, Assignments>();
 
   for (const date of dates) {
+    // Last week is whichever of this run or the DB has the Sunday before; next week can only be stored.
+    const previous = made.get(addDays(date, -7)) ?? stored.get(addDays(date, -7)) ?? {};
     const servedLastWeek = new Set(Object.values(previous).flat());
+    const servesNextWeek = new Set(Object.values(stored.get(addDays(date, 7)) ?? {}).flat());
     const blocked = new Set(roles.filter((r) => r.consecutiveDisabled).flatMap((r) => previous[r.id] ?? []));
     const busy = new Map<string, Set<number>>(); // person id -> sections taken this week
     const assignments: Assignments = {};
     const gaps: string[] = [];
 
     for (const role of roles) {
-      // Hard rules: holds the role, frequency > 0, not blocked, no section clash.
+      // Hard rules: holds the role, frequency > 0, not blocked, no section clash, and no consecutive
+      // role for someone serving next week (they would have to be blocked from it).
       // Quota is soft only as a last resort: over-quota people rank after everyone within quota.
       const ranked = people
         .filter(
@@ -84,6 +88,7 @@ function attempt(
             p.roles.includes(role.id) &&
             quotas.get(p.id)! > 0 &&
             !blocked.has(p.id) &&
+            !(role.consecutiveDisabled && servesNextWeek.has(p.id)) &&
             !role.busyFor.some((s) => busy.get(p.id)?.has(s)),
         )
         .map((p) => {
@@ -104,7 +109,7 @@ function attempt(
 
     for (const id of busy.keys()) used.set(id, used.get(id)! + 1);
     out.push({ date, assignments, gaps });
-    previous = assignments;
+    made.set(date, assignments);
   }
   return { weeks: out, overflow };
 }

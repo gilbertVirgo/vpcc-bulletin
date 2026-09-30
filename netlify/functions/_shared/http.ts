@@ -40,12 +40,3 @@ export function guarded(handler: Handler): Handler {
     return handler(req, url);
   };
 }
-
-/** The parsed JSON body, or undefined when it is not valid JSON. */
-export async function readJson(req: Request): Promise<unknown> {
-  try {
-    return await req.json();
-  } catch {
-    return undefined;
-  }
-}

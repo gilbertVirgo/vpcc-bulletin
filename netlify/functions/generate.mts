@@ -13,9 +13,15 @@ export default route({
     if (!count.ok) return badRequest(count.error);
     const c = await rota();
     const { roles, people } = await loadRolesAndPeople(c);
-    // Newest 8 stored weeks, past or future: frequency is accounted over them plus the new dates.
-    const stored = (await c.weeks.find().sort({ date: -1 }).limit(RECENT_WEEKS).toArray()).map(toWeek);
-    const { dates, recent } = planDates(nextSunday(new Date()), stored, count.value);
+    // Every future week (to skip, and for the rules either side of a gap) plus the newest 8 before
+    // them: that covers the 8 weeks before the first new date that frequency is accounted over.
+    const coming = nextSunday(new Date());
+    const [past, future] = await Promise.all([
+      c.weeks.find({ date: { $lt: coming } }).sort({ date: -1 }).limit(RECENT_WEEKS).toArray(),
+      c.weeks.find({ date: { $gte: coming } }).toArray(),
+    ]);
+    const recent = [...past, ...future].map(toWeek);
+    const dates = planDates(coming, future, count.value);
     return json({ weeks: generate({ people, roles, dates, recent, rng: Math.random }) });
   }),
 });
