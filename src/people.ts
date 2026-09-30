@@ -116,7 +116,7 @@ function edit(person: Person | null): void {
     h("div", { class: "field" }, h("label", { for: "person-name", class: "field__label" }, "Name"), name),
     h(
       "fieldset",
-      { class: "fieldset" },
+      { class: "fieldset fieldset--columns" },
       h("legend", { class: "field__label" }, "Roles"),
       ...data.roles.map((r, i) => h("div", { class: "check" }, boxes[i], h("label", { for: `role-${r.id}` }, r.name))),
     ),

@@ -2,7 +2,7 @@
  * Component classes (pinned; T5/T6 build against these names):
  *   Layout    container, page-head, stack, visually-hidden, skip-link
  *   Buttons   button + button--primary | --secondary | --ghost | --danger, button--sm
- *   Forms     field, field__label, field__hint, control, control--short, fieldset, check
+ *   Forms     field, field__label, field__hint, control, control--short, fieldset, fieldset--columns, check
  *   Table     table-scroll (sideways scroll wrapper), table (sticky first column), row-actions
  *   Dialog    dialog, dialog--wide, dialog__title, dialog__actions (use openModal() in ui.ts)
  *   Loading   skeleton, skeleton--line (use skeletonTable() in ui.ts)
@@ -261,6 +261,11 @@ main.container {
 	border: 0;
 }
 
+/* Checkbox lists: as many ~12rem columns as fit, one column on phones. */
+.fieldset--columns {
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--spacing) * 48)), 1fr));
+}
+
 .fieldset legend {
 	margin-bottom: calc(var(--spacing) * 3);
 	padding: 0;
@@ -286,7 +291,10 @@ main.container {
 }
 
 /* ---- Table: hairline rules, overline headers ---------------------------- */
+/* position: relative contains the absolutely positioned .visually-hidden spans in cells:
+   without a positioned ancestor they escape the sideways scroller and widen the whole page. */
 .table-scroll {
+	position: relative;
 	overflow-x: auto;
 	overscroll-behavior-x: contain;
 }

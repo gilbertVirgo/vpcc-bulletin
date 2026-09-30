@@ -1,10 +1,5 @@
 /* Rota page. Tokens only; component classes come from components.css. */
 
-/* Contain the absolutely positioned .visually-hidden spans in cells: without a positioned
-   ancestor they escape the sideways scroller and widen the whole page. */
-.table-scroll {
-	position: relative;
-}
 .cell__edit {
 	display: block;
 	width: calc(100% + var(--spacing) * 2);
