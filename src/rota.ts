@@ -61,9 +61,10 @@ function render(): void {
 
 function editCell(week: Week, role: Role): void {
   const current = new Set(week.assignments[role.id] ?? []);
-  // Whoever is already in the cell stays listed even if they no longer hold the role, so saving keeps them.
-  const holders = people.filter((p) => p.roles.includes(role.id) || current.has(p.id));
-  const label = (p: Person) => (p.roles.includes(role.id) ? p.name : `${p.name} (no longer does this role)`);
+  // Nobody holds a manual role, so everyone is offered. Otherwise whoever is already in the cell stays
+  // listed even if they no longer hold the role, so saving keeps them.
+  const holders = role.manual ? people : people.filter((p) => p.roles.includes(role.id) || current.has(p.id));
+  const label = (p: Person) => (role.manual || p.roles.includes(role.id) ? p.name : `${p.name} (no longer does this role)`);
   const error = h("p", { class: "error", role: "alert" });
   const boxes = holders.map((p) =>
     h("input", { type: "checkbox", id: `pick-${p.id}`, value: p.id, checked: current.has(p.id) }),

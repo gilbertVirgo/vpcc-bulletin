@@ -106,7 +106,8 @@ function edit(person: Person | null): void {
     id: "person-frequency", class: "control control--short", type: "number", inputmode: "numeric", min: 0, max: 100, step: 1,
     required: true, value: Math.round((person?.frequency ?? 0.5) * 100), "aria-describedby": "person-frequency-hint",
   });
-  const boxes = data.roles.map((r) =>
+  const roles = data.roles.filter((r) => !r.manual); // nobody holds a manual role
+  const boxes = roles.map((r) =>
     h("input", { type: "checkbox", id: `role-${r.id}`, value: r.id, checked: person?.roles.includes(r.id) ?? false }),
   );
   const submit = h("button", { type: "submit", class: "button button--primary" }, person ? "Save" : "Add");
@@ -118,7 +119,7 @@ function edit(person: Person | null): void {
       "fieldset",
       { class: "fieldset fieldset--columns" },
       h("legend", { class: "field__label" }, "Roles"),
-      ...data.roles.map((r, i) => h("div", { class: "check" }, boxes[i], h("label", { for: `role-${r.id}` }, r.name))),
+      ...roles.map((r, i) => h("div", { class: "check" }, boxes[i], h("label", { for: `role-${r.id}` }, r.name))),
     ),
     h(
       "div",

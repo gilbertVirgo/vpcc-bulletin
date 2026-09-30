@@ -38,7 +38,7 @@ export function personInput(body: unknown, roles: Role[]): Result<PersonInput> {
   return ok({ name, roles: list as string[], frequency: f });
 }
 
-/** `stored` is the cell as saved: people in it may stay after they stop holding the role. */
+/** `stored` is the cell as saved: people in it may stay after they stop holding the role. A manual role takes anyone. */
 export function cell(roleId: unknown, personIds: unknown, roles: Role[], people: Person[], stored: string[] = []): Result<string[]> {
   const role = roles.find((r) => r.id === roleId);
   if (!role) return fail(`Unknown role ${String(roleId)}`);
@@ -48,7 +48,7 @@ export function cell(roleId: unknown, personIds: unknown, roles: Role[], people:
   for (const id of personIds) {
     const p = typeof id === "string" && OBJECT_ID.test(id) ? people.find((x) => x.id === id) : undefined;
     if (!p) return fail(`Unknown person ${String(id)}`);
-    if (!p.roles.includes(role.id) && !stored.includes(p.id)) return fail(`${p.name} does not do ${role.name}`);
+    if (!role.manual && !p.roles.includes(role.id) && !stored.includes(p.id)) return fail(`${p.name} does not do ${role.name}`);
   }
   return ok(personIds as string[]);
 }

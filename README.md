@@ -49,7 +49,11 @@ npm run build        # typecheck + production build into dist/
 ## Migration
 
 `scripts/migrate.ts` imports roles and people from `~/rota-scheduler/data`
-(`--data <dir>` to override) and the future rows of the Google Sheet "Sundays" tab.
+(`--data <dir>` to override), plus the manual-only roles in `MANUAL_ROLES`
+(`scripts/lib.ts`: Preaching), and every Sunday row of the Google Sheet's
+`Schedule` tab (`GOOGLE_SHEET_TAB` to override), past ones included: past weeks feed
+the scheduler's frequency window and consecutive rules; the rota page only shows
+today onward.
 It is idempotent and safe to re-run after launch: roles are upserted by id, but people
 (by name) and weeks (by date) are only inserted when missing, so edits made in the app
 are never overwritten. Nothing is ever deleted. People and weeks already in the DB, and
@@ -69,8 +73,20 @@ Sheet input: set `GOOGLE_SHEET_ID` and put a service-account key at
 `google/credentials.json` (gitignored; `--credentials <file>` to override). Without
 both the sheet step is skipped. `--sheet-fixture <file>` reads rows from a JSON
 `string[][]` instead (header row first), e.g. `scripts/fixtures/sheet.json`.
-Unmatched names are listed as skipped; add spellings to `ROLE_ALIASES` /
-`PERSON_ALIASES` in `scripts/sheet.ts` and re-run.
+The tab has a `Date` column (`June 7 2026` or `7 June 2026`) and one column per role,
+headed with the role's name (case-insensitive); each cell is a comma-separated list of
+people. Rows that are not Sundays, or have nobody in a non-manual role (e.g. only a
+preacher, so the Sunday can still be generated), are skipped. Names are matched against
+the people in the DB plus the scheduler data. Unknown people are always skipped. Rows
+before today are history and keep everyone else as written; from today on, people who
+do not hold the role (any person may fill a manual role) and extras beyond a role's
+`needs` are skipped too. Everything skipped is listed; add spellings to `ROLE_ALIASES` / `PERSON_ALIASES` in
+`scripts/sheet.ts` and re-run.
+
+Manual roles (`manual: true` in `rota_roles`) are never filled by "Generate weeks" and
+never reported as unfilled, and serving in one does not count towards a person's
+frequency; anyone can be put in them by editing the cell, and they are
+not offered on the People page.
 
 ## Deploying to Netlify (owner checklist)
 

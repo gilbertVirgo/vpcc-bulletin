@@ -5,6 +5,7 @@ export type Role = {
   busyFor: number[]; // 0 pre-service, 1 during, 2 post-service
   consecutiveDisabled: boolean;
   order: number;
+  manual: boolean; // filled by hand only: generate() leaves it empty, and anyone may be put in it
 };
 export type Person = { id: string; name: string; roles: string[]; frequency: number };
 export type PersonName = { id: string; name: string };

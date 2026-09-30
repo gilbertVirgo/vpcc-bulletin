@@ -4,8 +4,10 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-/** Shapes of rota-scheduler's data/roles.js and data/users.js. */
-export type SeedRole = { id: string; name: string; needs: number; busyFor: number[]; consecutiveDisabled?: boolean };
+/** Shapes of rota-scheduler's data/roles.js and data/users.js (order and manual are ours). */
+export type SeedRole = {
+  id: string; name: string; needs: number; busyFor: number[]; consecutiveDisabled?: boolean; order?: number; manual?: boolean;
+};
 export type SeedPerson = { name: string; roles: string[]; frequency: number };
 
 export function dbName(uri: string): string {
@@ -28,11 +30,17 @@ export function argValue(argv: string[], flag: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+/** Roles rota-scheduler does not know about: filled by hand in the app, never generated. */
+export const MANUAL_ROLES: SeedRole[] = [
+  { id: "preaching", name: "Preaching", needs: 1, busyFor: [], consecutiveDisabled: false, order: 10, manual: true },
+];
+
+/** rota-scheduler's roles and people, plus MANUAL_ROLES. */
 export async function loadSchedulerData(
   dir = join(homedir(), "rota-scheduler", "data"),
 ): Promise<{ roles: SeedRole[]; people: SeedPerson[] }> {
   const load = async (file: string) => (await import(pathToFileURL(resolve(dir, file)).href)).default;
-  return { roles: await load("roles.js"), people: await load("users.js") };
+  return { roles: [...(await load("roles.js")), ...MANUAL_ROLES], people: await load("users.js") };
 }
 
 export async function connect(uri: string): Promise<{ client: MongoClient; db: Db }> {
@@ -46,10 +54,11 @@ export async function ensureIndexes(db: Db): Promise<void> {
 
 export type Doc = Record<string, unknown>;
 
-/** rota_roles documents as stored: _id = scheduler id, order = array index. */
+/** rota_roles documents as stored: _id = scheduler id, order = given order or array index. */
 export const roleDocs = (roles: SeedRole[]): Doc[] =>
-  roles.map((r, order) => ({
-    _id: r.id, name: r.name, needs: r.needs, busyFor: r.busyFor, consecutiveDisabled: Boolean(r.consecutiveDisabled), order,
+  roles.map((r, i) => ({
+    _id: r.id, name: r.name, needs: r.needs, busyFor: r.busyFor, consecutiveDisabled: Boolean(r.consecutiveDisabled),
+    order: r.order ?? i, manual: Boolean(r.manual),
   }));
 
 /** rota_people fields the migration owns (keyed by name; _id is left to Mongo). */

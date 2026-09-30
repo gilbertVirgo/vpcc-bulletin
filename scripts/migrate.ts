@@ -3,16 +3,17 @@
 //   npm run migrate                                      write to a *_dev DB
 //   CALENDAR_MONGODB_URI='<prod>' npm run migrate -- --production
 // Options: --data <rota-scheduler data dir> (default ~/rota-scheduler/data)
-//          --credentials <service account json> (default google/credentials.json); needs GOOGLE_SHEET_ID
+//          --credentials <service account json> (default google/credentials.json); needs GOOGLE_SHEET_ID,
+//          reads the tab GOOGLE_SHEET_TAB (default "Schedule")
 //          --sheet-fixture <json file> sheet rows (string[][], header first) instead of the live sheet
 import { existsSync, readFileSync } from "node:fs";
 import type { Db } from "mongodb";
 import { londonISO } from "../src/shared/dates.ts";
 import {
   type Diff, type Doc, argValue, assertWritable, connect, dbName, diffDocs, ensureIndexes, loadSchedulerData,
-  personDocs, roleDocs, upsertRolesAndPeople, upserts,
+  type SeedPerson, personDocs, roleDocs, upsertRolesAndPeople, upserts,
 } from "./lib.ts";
-import { type SheetWeek, flipSheet } from "./sheet.ts";
+import { type SheetWeek, parseSheet } from "./sheet.ts";
 
 async function readSheet(credentialsPath: string, fixture: string | undefined): Promise<string[][] | null> {
   if (fixture) {
@@ -29,7 +30,11 @@ async function readSheet(credentialsPath: string, fixture: string | undefined): 
     credentials: JSON.parse(readFileSync(credentialsPath, "utf8")),
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
-  const res = await google.sheets({ version: "v4", auth }).spreadsheets.values.get({ spreadsheetId: sheetId, range: "Sundays!A1:Z" });
+  const tab = process.env.GOOGLE_SHEET_TAB || "Schedule";
+  const res = await google.sheets({ version: "v4", auth }).spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `'${tab.replaceAll("'", "''")}'!A1:Z`,
+  });
   return (res.data.values ?? []) as string[][];
 }
 
@@ -87,24 +92,26 @@ if (isDryRun) {
 }
 
 const data = await loadSchedulerData(argValue(argv, "--data"));
-console.log(`Scheduler data: ${data.roles.length} roles, ${data.people.length} people.`);
-
+console.log(`Scheduler data: ${data.roles.length} roles (incl. manual), ${data.people.length} people.`);
 const values = await readSheet(argValue(argv, "--credentials") ?? "google/credentials.json", argValue(argv, "--sheet-fixture"));
-const { weeks, skipped }: { weeks: SheetWeek[]; skipped: string[] } = values
-  ? flipSheet(values, londonISO(new Date()), data.roles, data.people)
-  : { weeks: [], skipped: [] };
-console.log(`Sheet: ${weeks.length} week(s) dated today or later.`);
-for (const w of weeks) {
-  const cells = Object.entries(w.assignments).filter(([, names]) => names.length);
-  console.log(`  ${w.date}  ${cells.map(([role, names]) => `${role}=${names.join("+")}`).join("  ")}`);
-}
-if (skipped.length) {
-  console.log(`Skipped (${skipped.length}):`);
-  for (const s of skipped) console.log(`  - ${s}`);
-}
 
 const { client, db } = await connect(uri);
 try {
+  // Sheet names are matched against the people already in the DB (as edited in the app) plus any the
+  // scheduler data would add.
+  const stored = await db.collection<Doc>("rota_people").find().toArray();
+  const known = new Set(stored.map((p) => String(p.name)));
+  const people = [...(stored as unknown as SeedPerson[]), ...data.people.filter((p) => !known.has(p.name))];
+  const { weeks, skipped } = values ? parseSheet(values, londonISO(new Date()), data.roles, people) : { weeks: [], skipped: [] };
+  console.log(`Sheet: ${weeks.length} week(s) with assignments.`);
+  for (const w of weeks) {
+    const cells = Object.entries(w.assignments).filter(([, names]) => names.length);
+    console.log(`  ${w.date}  ${cells.map(([role, names]) => `${role}=${names.join("+")}`).join("  ")}`);
+  }
+  if (skipped.length) {
+    console.log(`Skipped (${skipped.length}):`);
+    for (const s of skipped) console.log(`  - ${s}`);
+  }
   await (isDryRun ? dryRun : write)(db, data, weeks);
 } finally {
   await client.close();
