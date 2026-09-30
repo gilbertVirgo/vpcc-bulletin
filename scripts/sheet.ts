@@ -36,11 +36,14 @@ const norm = (s: string) => s.trim().toLowerCase();
 
 /**
  * The "Schedule" tab: a "Date" column, then one column per role (heading = role name), each cell a
- * comma-separated list of people. Every dated Sunday with at least one assignment becomes a week,
- * past ones included. Assignments hold person names; anything not taken is listed in `skipped`.
+ * comma-separated list of people. Every dated Sunday with someone in a non-manual role becomes a week,
+ * past ones included. Weeks before `today` are history, so anyone known is kept; from `today` on,
+ * people must hold the role and a cell takes at most `needs`. Assignments hold person names;
+ * anything not taken is listed in `skipped`.
  */
 export function parseSheet(
   values: string[][],
+  today: string,
   roles: SeedRole[],
   people: SeedPerson[],
 ): { weeks: SheetWeek[]; skipped: string[] } {
@@ -83,6 +86,7 @@ export function parseSheet(
       skipped.push(`${date} is not a Sunday`);
       continue;
     }
+    const history = date < today;
     const assignments: Record<string, string[]> = Object.fromEntries(roles.map((r) => [r.id, []]));
     for (const [col, role] of columns) {
       for (const part of (row[col] ?? "").split(",")) {
@@ -90,13 +94,17 @@ export function parseSheet(
         const person = findPerson(part);
         const cell = assignments[role.id];
         if (!person) skipped.push(`Unknown person "${part.trim()}"`);
-        else if (!role.manual && !person.roles.includes(role.id)) skipped.push(`${person.name} does not do ${role.name} (${date})`);
+        else if (!history && !role.manual && !person.roles.includes(role.id)) skipped.push(`${person.name} does not do ${role.name} (${date})`);
         else if (cell.includes(person.name)) continue;
-        else if (cell.length >= role.needs) skipped.push(`${role.name} on ${date} is full; dropped ${person.name}`);
+        else if (!history && cell.length >= role.needs) skipped.push(`${role.name} on ${date} is full; dropped ${person.name}`);
         else cell.push(person.name);
       }
     }
-    if (Object.values(assignments).some((names) => names.length)) weeks.push({ date, assignments });
+    // Only manual roles filled (e.g. just a preacher): skipped, so the Sunday can still be generated.
+    if (roles.some((r) => !r.manual && assignments[r.id].length)) weeks.push({ date, assignments });
+    else if (roles.some((r) => assignments[r.id].length)) {
+      skipped.push(`${date} has only manual roles filled; skipped so it can be generated (fill them by hand after)`);
+    }
   }
   return { weeks, skipped: [...new Set(skipped)] };
 }

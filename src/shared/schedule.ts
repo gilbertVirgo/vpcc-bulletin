@@ -62,8 +62,11 @@ function attempt(
   rng: () => number,
 ): { weeks: GeneratedWeek[]; overflow: number } {
   const window = past.length + dates.length;
+  // Who served in a week: manual roles (e.g. Preaching) are filled by hand and do not count.
+  const served = (a: Assignments) => new Set(roles.filter((r) => !r.manual).flatMap((r) => a[r.id] ?? []));
+  const pastServed = past.map((w) => served(w.assignments));
   const quotas = new Map(people.map((p) => [p.id, quota(p.frequency, window)]));
-  const used = new Map(people.map((p) => [p.id, past.filter((w) => Object.values(w.assignments).some((ids) => ids.includes(p.id))).length]));
+  const used = new Map(people.map((p) => [p.id, pastServed.filter((ids) => ids.has(p.id)).length]));
   let overflow = 0;
   const out: GeneratedWeek[] = [];
   const made = new Map<string, Assignments>();
@@ -71,8 +74,8 @@ function attempt(
   for (const date of dates) {
     // Last week is whichever of this run or the DB has the Sunday before; next week can only be stored.
     const previous = made.get(addDays(date, -7)) ?? stored.get(addDays(date, -7)) ?? {};
-    const servedLastWeek = new Set(Object.values(previous).flat());
-    const servesNextWeek = new Set(Object.values(stored.get(addDays(date, 7)) ?? {}).flat());
+    const servedLastWeek = served(previous);
+    const servesNextWeek = served(stored.get(addDays(date, 7)) ?? {});
     const blocked = new Set(roles.filter((r) => r.consecutiveDisabled).flatMap((r) => previous[r.id] ?? []));
     const busy = new Map<string, Set<number>>(); // person id -> sections taken this week
     const assignments: Assignments = {};

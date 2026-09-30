@@ -58,7 +58,9 @@ Same database as the calendar (DB name = path of `CALENDAR_MONGODB_URI`).
 
 - Service sections: `0` pre-service, `1` during, `2` post-service.
 - Manual roles (`manual: true`, e.g. Preaching, added by our scripts on top of the
-  scheduler's roles): generate leaves the cell empty and never reports it as a gap;
+  scheduler's roles): generate leaves the cell empty and never reports it as a gap,
+  and serving only in a manual role does not count as serving that week (frequency,
+  last-week tie-break, next-week consecutive check);
   nobody holds them (not offered on the People page), and a cell edit accepts any person.
 - Person ids inside `assignments` are 24-char hex strings, not ObjectIds.
 - Stored weeks always carry a key for every role id (empty array when unfilled).
@@ -210,10 +212,13 @@ refuses unless the DB name ends in `_dev` or `--production` is passed.
     role name (trimmed, case-insensitive; also the role id or `ROLE_ALIASES`). Each
     cell is a comma-separated list of people, matched trimmed and case-insensitively
     (plus `PERSON_ALIASES`) against the DB's people and the scheduler data.
-    Every Sunday row with at least one assignment is migrated, past ones included
-    (they feed the scheduler's history; the rota view shows today onward).
+    Every Sunday row with someone in a non-manual role is migrated, past ones included
+    (they feed the scheduler's history; the rota view shows today onward). A row with
+    only manual roles filled is skipped so that Sunday can still be generated.
+    Rows before today keep every known person as written (history); from today on,
+    non-holders of a non-manual role and extras beyond `needs` are dropped.
     Skipped and reported: unknown column, unknown person, non-Sunday / unparseable
-    date, person not holding a non-manual role, extras beyond `needs`.
+    date, manual-only row, and (from today on) non-holders and extras.
     Weeks inserted by `date` only when missing (`$setOnInsert`; an existing week is
     kept as edited in the app). The dry run reports existing people and weeks as "kept".
   - Sheet step is skipped with a printed notice when the credentials file or

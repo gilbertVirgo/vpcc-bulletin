@@ -320,6 +320,20 @@ describe("generate", () => {
     expect(w).toEqual({ date: sundays(1)[0], assignments: { preaching: [] }, gaps: [] });
   });
 
+  it("does not count manual roles towards frequency", () => {
+    const people = [person("a", ["r"], 0.5), person("b", ["r"], 0.5)];
+    const roles = [role("r", [PRE]), role("preaching", [], { order: 1, manual: true })];
+    const recent: Week[] = [
+      { date: addDays(LAST_SUNDAY, -7), assignments: { r: ["b"], preaching: ["a"] } },
+      { date: LAST_SUNDAY, assignments: { r: ["b"], preaching: ["a"] } },
+    ];
+    for (const seed of SEEDS) {
+      // b served twice; a only preached, so a has served 0 of their quota and goes first.
+      const [w] = generate({ people, roles, dates: sundays(1), recent, rng: mulberry32(seed) });
+      expect(w.assignments.r).toEqual(["a"]);
+    }
+  });
+
   it("gives needs > 1 distinct people", () => {
     const people = [person("a", ["w"]), person("b", ["w"]), person("c", ["w"])];
     for (const seed of SEEDS) {

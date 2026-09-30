@@ -8,6 +8,7 @@
 //          --sheet-fixture <json file> sheet rows (string[][], header first) instead of the live sheet
 import { existsSync, readFileSync } from "node:fs";
 import type { Db } from "mongodb";
+import { londonISO } from "../src/shared/dates.ts";
 import {
   type Diff, type Doc, argValue, assertWritable, connect, dbName, diffDocs, ensureIndexes, loadSchedulerData,
   type SeedPerson, personDocs, roleDocs, upsertRolesAndPeople, upserts,
@@ -101,7 +102,7 @@ try {
   const stored = await db.collection<Doc>("rota_people").find().toArray();
   const known = new Set(stored.map((p) => String(p.name)));
   const people = [...(stored as unknown as SeedPerson[]), ...data.people.filter((p) => !known.has(p.name))];
-  const { weeks, skipped } = values ? parseSheet(values, data.roles, people) : { weeks: [], skipped: [] };
+  const { weeks, skipped } = values ? parseSheet(values, londonISO(new Date()), data.roles, people) : { weeks: [], skipped: [] };
   console.log(`Sheet: ${weeks.length} week(s) with assignments.`);
   for (const w of weeks) {
     const cells = Object.entries(w.assignments).filter(([, names]) => names.length);
