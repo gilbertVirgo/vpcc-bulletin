@@ -2,6 +2,7 @@ import { type Db, MongoClient } from "mongodb";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 /** Shapes of rota-scheduler's data/roles.js and data/users.js. */
 export type SeedRole = { id: string; name: string; needs: number; busyFor: number[]; consecutiveDisabled?: boolean };
@@ -43,26 +44,50 @@ export async function ensureIndexes(db: Db): Promise<void> {
   await db.collection("rota_weeks").createIndex({ date: 1 }, { unique: true });
 }
 
-/** Roles keyed by scheduler id (order = array index); people keyed by name. Idempotent. */
+export type Doc = Record<string, unknown>;
+
+/** rota_roles documents as stored: _id = scheduler id, order = array index. */
+export const roleDocs = (roles: SeedRole[]): Doc[] =>
+  roles.map((r, order) => ({
+    _id: r.id, name: r.name, needs: r.needs, busyFor: r.busyFor, consecutiveDisabled: Boolean(r.consecutiveDisabled), order,
+  }));
+
+/** rota_people fields the migration owns (keyed by name; _id is left to Mongo). */
+export const personDocs = (people: SeedPerson[]): Doc[] =>
+  people.map((p) => ({ name: p.name, roles: p.roles, frequency: p.frequency }));
+
+export type Diff = {
+  insert: string[];
+  update: { key: string; fields: string[] }[];
+  unchanged: string[];
+  /** In the DB but not in the source: left alone, never deleted. */
+  kept: string[];
+};
+
+/** What upserting `desired` by `key` would do to `current`. Only desired fields are compared. */
+export function diffDocs(current: Doc[], desired: Doc[], key: string): Diff {
+  const byKey = new Map(current.map((d) => [String(d[key]), d]));
+  const diff: Diff = { insert: [], update: [], unchanged: [], kept: [] };
+  for (const d of desired) {
+    const k = String(d[key]);
+    const have = byKey.get(k);
+    if (!have) {
+      diff.insert.push(k);
+      continue;
+    }
+    const fields = Object.keys(d).filter((f) => f !== key && !isDeepStrictEqual(d[f], have[f]));
+    if (fields.length) diff.update.push({ key: k, fields });
+    else diff.unchanged.push(k);
+  }
+  const wanted = new Set(desired.map((d) => String(d[key])));
+  diff.kept = [...byKey.keys()].filter((k) => !wanted.has(k));
+  return diff;
+}
+
+/** Roles keyed by scheduler id; people keyed by name. Idempotent. */
 export async function upsertRolesAndPeople(db: Db, data: { roles: SeedRole[]; people: SeedPerson[] }): Promise<void> {
-  if (data.roles.length) {
-    await db.collection<{ _id: string }>("rota_roles").bulkWrite(
-      data.roles.map((r, order) => ({
-        updateOne: {
-          filter: { _id: r.id },
-          update: {
-            $set: { name: r.name, needs: r.needs, busyFor: r.busyFor, consecutiveDisabled: Boolean(r.consecutiveDisabled), order },
-          },
-          upsert: true,
-        },
-      })),
-    );
-  }
-  if (data.people.length) {
-    await db.collection("rota_people").bulkWrite(
-      data.people.map((p) => ({
-        updateOne: { filter: { name: p.name }, update: { $set: { roles: p.roles, frequency: p.frequency } }, upsert: true },
-      })),
-    );
-  }
+  const upserts = (docs: Doc[], key: string) =>
+    docs.map(({ [key]: k, ...rest }) => ({ updateOne: { filter: { [key]: k }, update: { $set: rest }, upsert: true } }));
+  if (data.roles.length) await db.collection<Doc>("rota_roles").bulkWrite(upserts(roleDocs(data.roles), "_id"));
+  if (data.people.length) await db.collection<Doc>("rota_people").bulkWrite(upserts(personDocs(data.people), "name"));
 }

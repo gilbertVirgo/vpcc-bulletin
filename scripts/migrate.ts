@@ -1,15 +1,24 @@
 // One-off, idempotent import into the calendar DB named by CALENDAR_MONGODB_URI.
-//   npm run migrate -- --dry-run                         print the report, touch nothing (no DB connection)
+//   npm run migrate -- --dry-run                         read-only: diff against the target DB, writes nothing
 //   npm run migrate                                      write to a *_dev DB
 //   CALENDAR_MONGODB_URI='<prod>' npm run migrate -- --production
 // Options: --data <rota-scheduler data dir> (default ~/rota-scheduler/data)
 //          --credentials <service account json> (default google/credentials.json); needs GOOGLE_SHEET_ID
+//          --sheet-fixture <json file> sheet rows (string[][], header first) instead of the live sheet
 import { existsSync, readFileSync } from "node:fs";
+import type { Db } from "mongodb";
 import { londonISO } from "../src/shared/dates.ts";
-import { argValue, assertWritable, connect, ensureIndexes, loadSchedulerData, upsertRolesAndPeople } from "./lib.ts";
+import {
+  type Diff, type Doc, argValue, assertWritable, connect, dbName, diffDocs, ensureIndexes, loadSchedulerData,
+  personDocs, roleDocs, upsertRolesAndPeople,
+} from "./lib.ts";
 import { type SheetWeek, flipSheet } from "./sheet.ts";
 
-async function readSheet(credentialsPath: string): Promise<string[][] | null> {
+async function readSheet(credentialsPath: string, fixture: string | undefined): Promise<string[][] | null> {
+  if (fixture) {
+    console.log(`Sheet rows from fixture ${fixture}.`);
+    return JSON.parse(readFileSync(fixture, "utf8"));
+  }
   const sheetId = process.env.GOOGLE_SHEET_ID;
   if (!sheetId || !existsSync(credentialsPath)) {
     console.log(`Sheet step skipped: ${sheetId ? `${credentialsPath} not found` : "GOOGLE_SHEET_ID not set"}.`);
@@ -24,12 +33,61 @@ async function readSheet(credentialsPath: string): Promise<string[][] | null> {
   return (res.data.values ?? []) as string[][];
 }
 
+/** Week docs with person names swapped for id hex strings. Unknown ids (dry run, person not yet inserted) → "new:<name>". */
+const weekDocs = (weeks: SheetWeek[], ids: Map<string, string>): Doc[] =>
+  weeks.map((w) => ({
+    date: w.date,
+    assignments: Object.fromEntries(
+      Object.entries(w.assignments).map(([role, names]) => [role, names.map((n) => ids.get(n) ?? `new:${n}`)]),
+    ),
+  }));
+
+const personIds = (people: Doc[]) => new Map(people.map((p) => [String(p.name), String(p._id)]));
+
+function printDiff(collection: string, d: Diff): void {
+  console.log(
+    `${collection}: ${d.insert.length} insert, ${d.update.length} update, ${d.unchanged.length} unchanged, ${d.kept.length} kept (not in source)`,
+  );
+  for (const k of d.insert) console.log(`  + ${k}`);
+  for (const u of d.update) console.log(`  ~ ${u.key}: ${u.fields.join(", ")}`);
+  for (const k of d.kept) console.log(`  = ${k} (kept, not in source)`);
+}
+
+/** Dry run: reads only. No assertWritable here on purpose — this path has no write calls, so any DB is safe. */
+async function dryRun(db: Db, data: Awaited<ReturnType<typeof loadSchedulerData>>, weeks: SheetWeek[]): Promise<void> {
+  const read = (name: string) => db.collection<Doc>(name).find().toArray();
+  const [roles, people, stored] = await Promise.all([read("rota_roles"), read("rota_people"), read("rota_weeks")]);
+  console.log(`Dry run against ${db.databaseName} (read-only):`);
+  printDiff("rota_roles", diffDocs(roles, roleDocs(data.roles), "_id"));
+  printDiff("rota_people", diffDocs(people, personDocs(data.people), "name"));
+  printDiff("rota_weeks", diffDocs(stored, weekDocs(weeks, personIds(people)), "date"));
+  console.log("Dry run: nothing written.");
+}
+
+async function write(db: Db, data: Awaited<ReturnType<typeof loadSchedulerData>>, weeks: SheetWeek[]): Promise<void> {
+  await ensureIndexes(db);
+  await upsertRolesAndPeople(db, data);
+  const ids = personIds(await db.collection<Doc>("rota_people").find().toArray());
+  for (const { date, assignments } of weekDocs(weeks, ids)) {
+    await db.collection("rota_weeks").updateOne({ date }, { $set: { assignments } }, { upsert: true });
+  }
+  console.log(`Wrote to ${db.databaseName}: ${data.roles.length} roles, ${data.people.length} people, ${weeks.length} week(s).`);
+}
+
 const argv = process.argv.slice(2);
-const dryRun = argv.includes("--dry-run");
+const isDryRun = argv.includes("--dry-run");
+const uri = process.env.CALENDAR_MONGODB_URI ?? "";
+// Check the target before any work: the write path refuses non-_dev without --production.
+if (isDryRun) {
+  if (!dbName(uri)) throw new Error("CALENDAR_MONGODB_URI has no database name in its path");
+} else {
+  assertWritable(uri, argv);
+}
+
 const data = await loadSchedulerData(argValue(argv, "--data"));
 console.log(`Scheduler data: ${data.roles.length} roles, ${data.people.length} people.`);
 
-const values = await readSheet(argValue(argv, "--credentials") ?? "google/credentials.json");
+const values = await readSheet(argValue(argv, "--credentials") ?? "google/credentials.json", argValue(argv, "--sheet-fixture"));
 const { weeks, skipped }: { weeks: SheetWeek[]; skipped: string[] } = values
   ? flipSheet(values, londonISO(new Date()), data.roles, data.people)
   : { weeks: [], skipped: [] };
@@ -43,25 +101,9 @@ if (skipped.length) {
   for (const s of skipped) console.log(`  - ${s}`);
 }
 
-if (dryRun) {
-  console.log("Dry run: nothing written.");
-} else {
-  const uri = process.env.CALENDAR_MONGODB_URI ?? "";
-  const name = assertWritable(uri, argv);
-  const { client, db } = await connect(uri);
-  try {
-    await ensureIndexes(db);
-    await upsertRolesAndPeople(db, data);
-    const people = await db.collection<{ name: string }>("rota_people").find().toArray();
-    const ids = new Map(people.map((p) => [p.name, p._id.toHexString()]));
-    for (const w of weeks) {
-      const assignments = Object.fromEntries(
-        Object.entries(w.assignments).map(([role, names]) => [role, names.map((n) => ids.get(n)!)]),
-      );
-      await db.collection("rota_weeks").updateOne({ date: w.date }, { $set: { assignments } }, { upsert: true });
-    }
-    console.log(`Wrote to ${name}: ${data.roles.length} roles, ${data.people.length} people, ${weeks.length} week(s).`);
-  } finally {
-    await client.close();
-  }
+const { client, db } = await connect(uri);
+try {
+  await (isDryRun ? dryRun : write)(db, data, weeks);
+} finally {
+  await client.close();
 }

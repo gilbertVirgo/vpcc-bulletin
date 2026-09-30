@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertWritable, dbName } from "./lib.ts";
+import { assertWritable, dbName, diffDocs } from "./lib.ts";
 
 const uri = (db: string) => `mongodb+srv://u:p@cluster0.example.net/${db}?retryWrites=true`;
 
@@ -25,5 +25,33 @@ describe("assertWritable", () => {
   });
   it("refuses a URI with no database", () => {
     expect(() => assertWritable("mongodb://localhost:27017", ["--production"])).toThrow(/no database/);
+  });
+});
+
+describe("diffDocs", () => {
+  it("sorts desired docs into insert / update (with fields) / unchanged and lists DB-only docs as kept", () => {
+    const current = [
+      { _id: "x1", name: "Gil", roles: ["worship"], frequency: 0.8 },
+      { _id: "x2", name: "Tom", roles: ["welcome"], frequency: 0.5 },
+      { _id: "x3", name: "Old", roles: [], frequency: 1 },
+    ];
+    const desired = [
+      { name: "Gil", roles: ["worship"], frequency: 0.8 },
+      { name: "Tom", roles: ["welcome", "lyrics"], frequency: 0.6 },
+      { name: "New", roles: [], frequency: 1 },
+    ];
+    expect(diffDocs(current, desired, "name")).toEqual({
+      insert: ["New"],
+      update: [{ key: "Tom", fields: ["roles", "frequency"] }],
+      unchanged: ["Gil"],
+      kept: ["Old"],
+    });
+  });
+  it("compares nested values deeply", () => {
+    const week = { date: "2030-01-06", assignments: { worship: ["a"] } };
+    expect(diffDocs([week], [{ date: "2030-01-06", assignments: { worship: ["a"] } }], "date").unchanged).toEqual(["2030-01-06"]);
+    expect(diffDocs([week], [{ date: "2030-01-06", assignments: { worship: ["b"] } }], "date").update).toEqual([
+      { key: "2030-01-06", fields: ["assignments"] },
+    ]);
   });
 });
