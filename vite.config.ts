@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         people: resolve(import.meta.dirname, "people.html"),
+        "role-info": resolve(import.meta.dirname, "role-info.html"),
       },
     },
   },

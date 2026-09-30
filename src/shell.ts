@@ -22,7 +22,7 @@ function logo(): SVGSVGElement {
 }
 
 /** Renders the header into #site-header and returns who is signed in. */
-export async function mountShell(active: "rota" | "people"): Promise<Me> {
+export async function mountShell(active: "rota" | "people" | "role-info"): Promise<Me> {
   const me = await api<Me>("me");
   const link = (href: string, label: string, key: string) =>
     h("a", { href, "aria-current": key === active ? "page" : undefined }, label);
@@ -37,7 +37,7 @@ export async function mountShell(active: "rota" | "people"): Promise<Me> {
       "div",
       { class: "container site-header__inner" },
       h("a", { href: "/", class: "site-header__logo", "aria-label": "Victoria Park Community Church rota" }, logo()),
-      h("nav", { class: "site-nav", "aria-label": "Main" }, link("/", "Rota", "rota"), me.user ? link("/people", "People", "people") : null),
+      h("nav", { class: "site-nav", "aria-label": "Main" }, link("/", "Rota", "rota"), link("/role-info", "Role info", "role-info"), me.user ? link("/people", "People", "people") : null),
       h("div", { class: "site-header__auth" }, ...auth),
     ),
   );
