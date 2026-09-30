@@ -3,6 +3,7 @@ import "./styles/rota.css";
 import { ApiError, api, message } from "./api";
 import { h } from "./dom";
 import { cellKey, rotaTable, rotaWeek } from "./rota-table";
+import { findConflicts } from "./shared/conflicts";
 import { shortDate } from "./shared/dates";
 import type { GeneratedWeek, Me, PeopleResponse, Person, Role, RotaResponse, Week } from "./shared/types";
 import { mountShell } from "./shell";
@@ -16,6 +17,24 @@ let rota: RotaResponse = { roles: [], people: [], weeks: [] };
 let people: Person[] = []; // full records (who holds which role); only loaded when signed in
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Conflicts for `shown`, judged against `context` too (e.g. the stored weeks either side of a preview). */
+function conflictsFor(shown: Week[], context: Week[] = []): Map<string, string[]> {
+  const dates = new Set(shown.map((w) => w.date));
+  const all = findConflicts([...context.filter((w) => !dates.has(w.date)), ...shown], rota.roles, people);
+  return new Map([...all].filter(([key]) => dates.has(key.split("/")[0])));
+}
+
+/** "3 conflicts" line plus one line per cell, so they are readable without hovering. */
+function conflictList(conflicts: Map<string, string[]>, note = ""): HTMLElement | null {
+  if (!conflicts.size) return null;
+  const role = new Map(rota.roles.map((r) => [r.id, r.name]));
+  const lines = [...conflicts].flatMap(([key, msgs]) => {
+    const [date, roleId] = key.split("/");
+    return msgs.map((m) => h("li", {}, `${shortDate(date)} · ${role.get(roleId)}: ${m}`));
+  });
+  return h("div", { class: "error" }, h("p", {}, `${plural(lines.length, "conflict")}.${note}`), h("ul", {}, ...lines));
+}
 
 async function start(): Promise<void> {
   me = await mountShell("rota");
@@ -54,19 +73,54 @@ function render(): void {
     );
     return;
   }
+  if (!me.user) {
+    body.replaceChildren(rotaWeek(rota.roles, rota.people, rota.weeks));
+    return;
+  }
+  const conflicts = conflictsFor(rota.weeks);
   body.replaceChildren(
-    me.user
-      ? rotaTable(rota.roles, rota.people, rota.weeks, "Sunday rota", { onEditCell: editCell, onDeleteWeek: deleteWeek })
-      : rotaWeek(rota.roles, rota.people, rota.weeks),
+    ...[
+      conflictList(conflicts),
+      rotaTable(rota.roles, rota.people, rota.weeks, "Sunday rota", {
+        onEditCell: (week, role) => editCell(week, role, rota.weeks, (ids) => saveCell(week, role, ids), () => {
+          render();
+          body.querySelector<HTMLElement>(`[data-cell="${cellKey(week.date, role.id)}"]`)?.focus();
+          status.textContent = `Saved ${role.name} for ${shortDate(week.date)}.`;
+        }),
+        onDeleteWeek: deleteWeek,
+        conflicts,
+      }),
+    ].filter((n): n is HTMLElement => n !== null),
   );
 }
 
-function editCell(week: Week, role: Role): void {
+async function saveCell(week: Week, role: Role, personIds: string[]): Promise<void> {
+  const { week: saved } = await api<{ week: Week }>(`weeks?date=${week.date}`, { method: "PUT", body: { roleId: role.id, personIds } });
+  // Patch in place rather than reloading, so focus can go back to the cell that was edited.
+  rota.weeks = rota.weeks.map((w) => (w.date === saved.date ? saved : w));
+}
+
+/**
+ * Picker for one cell. `weeks` is the rota the cell sits in, used to show what each choice would clash with.
+ * `save` stores the choice (the dialog stays open to show its error if it throws); `saved` runs after close.
+ */
+function editCell(
+  week: Week, role: Role, weeks: Week[], save: (personIds: string[]) => Promise<void>, saved: () => void,
+): void {
   const current = new Set(week.assignments[role.id] ?? []);
   // Nobody holds a manual role, so everyone is offered. Otherwise whoever is already in the cell stays
   // listed even if they no longer hold the role, so saving keeps them.
   const holders = role.manual ? people : people.filter((p) => p.roles.includes(role.id) || current.has(p.id));
-  const label = (p: Person) => (role.manual || p.roles.includes(role.id) ? p.name : `${p.name} (no longer does this role)`);
+  // What picking each person would break, ignoring whoever else is in the cell now.
+  const wouldBreak = (p: Person) => {
+    const trial = { date: week.date, assignments: { ...week.assignments, [role.id]: [p.id] } };
+    const msgs = findConflicts([...weeks.filter((w) => w.date !== week.date), trial], rota.roles, people).get(cellKey(week.date, role.id)) ?? [];
+    return msgs.filter((m) => !m.endsWith(`does not do ${role.name}`));
+  };
+  const label = (p: Person) => {
+    const notes = [...(role.manual || p.roles.includes(role.id) ? [] : ["no longer does this role"]), ...wouldBreak(p).map((m) => m.slice(p.name.length + 1))];
+    return notes.length ? `${p.name} (${notes.join("; ")})` : p.name;
+  };
   const error = h("p", { class: "error", role: "alert" });
   const boxes = holders.map((p) =>
     h("input", { type: "checkbox", id: `pick-${p.id}`, value: p.id, checked: current.has(p.id) }),
@@ -104,16 +158,9 @@ function editCell(week: Week, role: Role): void {
     error.textContent = "";
     saveButton.disabled = true;
     try {
-      const { week: saved } = await api<{ week: Week }>(`weeks?date=${week.date}`, {
-        method: "PUT",
-        body: { roleId: role.id, personIds: boxes.filter((b) => b.checked).map((b) => b.value) },
-      });
+      await save(boxes.filter((b) => b.checked).map((b) => b.value));
       dialog.close();
-      // Patch in place rather than reloading, so focus can go back to the cell that was edited.
-      rota.weeks = rota.weeks.map((w) => (w.date === saved.date ? saved : w));
-      render();
-      body.querySelector<HTMLElement>(`[data-cell="${cellKey(saved.date, role.id)}"]`)?.focus();
-      status.textContent = `Saved ${role.name} for ${shortDate(week.date)}.`;
+      saved();
     } catch (err) {
       error.textContent = message(err);
       saveButton.disabled = false;
@@ -164,6 +211,44 @@ function openGenerate(): void {
   );
   dialog.classList.add("dialog--wide");
 
+  // Edits change the preview only; nothing is stored until Save.
+  const renderPreview = () => {
+    const gaps = preview.reduce((n, w) => n + w.gaps.length, 0);
+    const conflicts = conflictsFor(preview, rota.weeks);
+    out.replaceChildren(
+      ...[
+        h(
+          "p",
+          { class: gaps ? "error" : "status" },
+          gaps
+            ? `${plural(gaps, "role")} could not be filled — marked Unfilled. Click a cell to fill it by hand.`
+            : `Every role is filled for ${plural(preview.length, "Sunday")}. Click a cell to change it.`,
+        ),
+        conflictList(conflicts, " You can still save."),
+        rotaTable(rota.roles, rota.people, preview, "Generated preview", {
+          conflicts,
+          onEditCell: (week, role) =>
+            editCell(
+              week,
+              role,
+              [...rota.weeks, ...preview],
+              async (ids) => {
+                preview = preview.map((w) => {
+                  if (w.date !== week.date) return w;
+                  const gaps = w.gaps.filter((g) => g !== role.id);
+                  return { date: w.date, assignments: { ...w.assignments, [role.id]: ids }, gaps: ids.length < role.needs && !role.manual ? [...gaps, role.id] : gaps };
+                });
+              },
+              () => {
+                renderPreview();
+                out.querySelector<HTMLElement>(`[data-cell="${cellKey(week.date, role.id)}"]`)?.focus();
+              },
+            ),
+        }),
+      ].filter((n): n is HTMLElement => n !== null),
+    );
+  };
+
   // One request at a time: both actions are locked while either is in flight.
   const busy = (on: boolean) => {
     generateButton.disabled = on;
@@ -176,17 +261,7 @@ function openGenerate(): void {
     busy(true);
     try {
       preview = (await api<{ weeks: GeneratedWeek[] }>("generate", { method: "POST", body: { weeks: count.valueAsNumber } })).weeks;
-      const gaps = preview.reduce((n, w) => n + w.gaps.length, 0);
-      out.replaceChildren(
-        h(
-          "p",
-          { class: gaps ? "error" : "status" },
-          gaps
-            ? `${plural(gaps, "role")} could not be filled — marked Unfilled. Add people to those roles, or fill them by hand after saving.`
-            : `Every role is filled for ${plural(preview.length, "Sunday")}.`,
-        ),
-        rotaTable(rota.roles, rota.people, preview, "Generated preview"),
-      );
+      renderPreview();
       generateButton.textContent = "Regenerate";
     } catch (err) {
       error.textContent = message(err);
