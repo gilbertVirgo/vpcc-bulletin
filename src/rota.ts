@@ -2,7 +2,7 @@ import "./styles/index.css";
 import "./styles/rota.css";
 import { ApiError, api, message } from "./api";
 import { h } from "./dom";
-import { cellKey, rotaTable } from "./rota-table";
+import { cellKey, rotaTable, rotaWeek } from "./rota-table";
 import { findConflicts } from "./shared/conflicts";
 import { shortDate } from "./shared/dates";
 import type { GeneratedWeek, Me, PeopleResponse, Person, Role, RotaResponse, Week } from "./shared/types";
@@ -52,7 +52,7 @@ async function start(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  body.replaceChildren(skeletonTable(11, 4, "Loading the rota"));
+  body.replaceChildren(skeletonTable(me.user ? 5 : 2, 11, "Loading the rota"));
   try {
     const [r, p] = await Promise.all([
       api<RotaResponse>("weeks"),
@@ -74,7 +74,7 @@ function render(): void {
     return;
   }
   if (!me.user) {
-    body.replaceChildren(rotaTable(rota.roles, rota.people, rota.weeks, "Sunday rota"));
+    body.replaceChildren(rotaWeek(rota.roles, rota.people, rota.weeks));
     return;
   }
   const conflicts = conflictsFor(rota.weeks);
