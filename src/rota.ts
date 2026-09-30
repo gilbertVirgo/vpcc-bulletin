@@ -31,9 +31,16 @@ function conflictList(conflicts: Map<string, string[]>, note = ""): HTMLElement 
   const role = new Map(rota.roles.map((r) => [r.id, r.name]));
   const lines = [...conflicts].flatMap(([key, msgs]) => {
     const [date, roleId] = key.split("/");
-    return msgs.map((m) => h("li", {}, `${shortDate(date)} · ${role.get(roleId)}: ${m}`));
+    return msgs.map((m) =>
+      h("li", {}, h("span", { class: "conflicts__where" }, `${shortDate(date)} · ${role.get(roleId)}`), h("span", {}, m)),
+    );
   });
-  return h("div", { class: "error" }, h("p", {}, `${plural(lines.length, "conflict")}.${note}`), h("ul", {}, ...lines));
+  return h(
+    "section",
+    { class: "conflicts" },
+    h("p", { class: "conflicts__title" }, `${plural(lines.length, "conflict")}.${note}`),
+    h("ul", { class: "conflicts__list" }, ...lines),
+  );
 }
 
 async function start(): Promise<void> {
@@ -41,7 +48,7 @@ async function start(): Promise<void> {
   main.replaceChildren(
     h(
       "div",
-      { class: "page-head" },
+      { class: me.user ? "page-head" : "page-head page-head--center" },
       h("h1", {}, "Sunday rota"),
       me.user ? h("button", { type: "button", class: "button button--primary", onclick: openGenerate }, "Generate weeks") : null,
     ),

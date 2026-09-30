@@ -37,6 +37,10 @@ main.container {
 	margin-bottom: calc(var(--spacing) * 6);
 }
 
+.page-head--center {
+	justify-content: center;
+}
+
 .visually-hidden {
 	position: absolute;
 	width: 1px;
@@ -339,6 +343,121 @@ main.container {
 
 .table td {
 	min-width: calc(var(--spacing) * 28);
+}
+
+/* Reads as plain text; the field shows on hover and focus. */
+.inline-input {
+	width: 100%;
+	min-width: calc(var(--spacing) * 20);
+	field-sizing: content;
+	margin: calc(var(--spacing) * -1) 0 calc(var(--spacing) * -1) calc(var(--spacing) * -2);
+	padding: calc(var(--spacing) * 1) calc(var(--spacing) * 2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-md);
+	background: transparent;
+	font-weight: inherit;
+	transition:
+		background-color var(--duration-fast) var(--ease-standard),
+		border-color var(--duration-fast) var(--ease-standard);
+}
+
+.inline-input:hover {
+	border-color: var(--color-line-strong);
+}
+
+.inline-input:focus {
+	border-color: var(--color-line-strong);
+	background-color: var(--color-surface-raised);
+}
+
+/* Fits "100": three digits plus padding and border. */
+.inline-input--number {
+	width: calc(3ch + var(--spacing) * 3 + 2px);
+	min-width: 0;
+	padding-right: calc(var(--spacing) * 1);
+	text-align: right;
+	appearance: textfield;
+}
+
+.inline-input--number::-webkit-inner-spin-button {
+	appearance: none;
+}
+
+.inline-percent {
+	display: inline-flex;
+	align-items: baseline;
+}
+
+.pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: calc(var(--spacing) * 1.5);
+}
+
+.pill {
+	display: inline-flex;
+	align-items: center;
+	height: calc(var(--spacing) * 7);
+	padding-inline: calc(var(--spacing) * 3);
+	border: 1px solid var(--color-line);
+	border-radius: var(--radius-pill);
+	background-color: var(--color-surface-sunken);
+	font-size: var(--text-caption);
+	white-space: nowrap;
+}
+
+/* × fades in on hover or keyboard focus; always shown where there is no hover. */
+.pill__remove {
+	display: inline-grid;
+	place-items: center;
+	width: calc(var(--spacing) * 4);
+	height: calc(var(--spacing) * 4);
+	margin-inline: calc(var(--spacing) * 1) calc(var(--spacing) * -1);
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: none;
+	color: var(--color-ink-muted);
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.pill:hover .pill__remove,
+.pill__remove:focus-visible {
+	opacity: 1;
+}
+
+.pill__remove:hover {
+	background-color: var(--color-danger);
+	color: var(--color-ink-inverse);
+}
+
+@media (hover: none) {
+	.pill__remove {
+		opacity: 1;
+	}
+}
+
+.pill--add {
+	justify-content: center;
+	width: calc(var(--spacing) * 7);
+	padding: 0;
+	border-style: dashed;
+	border-color: var(--color-line-strong);
+	background-color: transparent;
+	color: var(--color-ink-secondary);
+	font-size: var(--text-body-sm);
+	text-align: center;
+	text-align-last: center;
+	appearance: none;
+	cursor: pointer;
+}
+
+.pill--add:hover {
+	border-color: var(--color-ink-muted);
+	color: var(--color-ink);
 }
 
 .row-actions {
