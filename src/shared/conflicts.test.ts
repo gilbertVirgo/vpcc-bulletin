@@ -22,18 +22,22 @@ describe("findConflicts", () => {
   });
 
   it("flags serving the week after a consecutive role, but not a manual role", () => {
-    const weeks: Week[] = [
-      { date: "2026-10-04", assignments: { worship: ["a"] } },
-      { date: "2026-10-11", assignments: { lunch: ["a"], preach: ["a"] } },
-    ];
-    const c = findConflicts(weeks, ROLES, PEOPLE);
-    expect(c.get("2026-10-11/lunch")).toEqual(["A was on worship the week before"]);
-    expect(c.has("2026-10-11/preach")).toBe(false);
+    const after = (assignments: Week["assignments"]) => findConflicts([{ date: "2026-10-04", assignments: { worship: ["a"] } }, { date: "2026-10-11", assignments }], ROLES, PEOPLE);
+    expect(after({ lunch: ["a"] }).get("2026-10-11/lunch")).toEqual(["A was on worship the week before"]);
+    expect(after({ preach: ["a"] }).size).toBe(0);
   });
 
   it("flags someone in a role they do not hold, except manual roles", () => {
     const c = findConflicts([{ date: "2026-10-04", assignments: { worship: ["b"], preach: ["b"] } }], ROLES, PEOPLE);
-    expect(c.get("2026-10-04/worship")).toEqual(["B does not do worship", "B is also on preach at the same time"]);
-    expect(c.get("2026-10-04/preach")).toEqual(["B is also on worship at the same time"]);
+    expect(c.get("2026-10-04/worship")).toEqual(["B does not do worship", "B is also on preach, and preach should be their only role that week"]);
+    expect(c.get("2026-10-04/preach")).toEqual(["B is also on worship, and preach should be their only role that week"]);
+  });
+
+  it("flags every other role of someone in a manual role, even with no section clash", () => {
+    const c = findConflicts([{ date: "2026-10-04", assignments: { welcome: ["a"], lunch: ["a"], preach: ["a"], worship: ["b"] } }], ROLES, [...PEOPLE, person("b", ["worship"])]);
+    expect(c.get("2026-10-04/welcome")).toEqual(["A is also on preach, and preach should be their only role that week"]);
+    expect(c.get("2026-10-04/lunch")).toEqual(["A is also on preach, and preach should be their only role that week"]);
+    expect(c.get("2026-10-04/preach")).toEqual(["A is also on welcome, lunch, and preach should be their only role that week"]);
+    expect(c.has("2026-10-04/worship")).toBe(false);
   });
 });
