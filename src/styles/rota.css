@@ -42,7 +42,8 @@
 }
 
 /* Quiet until pointed at: the column head's date says which Sunday it removes. */
-.week-remove {
+.week-remove,
+.week-download {
 	display: block;
 	padding: 0;
 	border: 0;
@@ -207,11 +208,6 @@
 	display: block;
 	color: var(--color-ink-muted);
 	font-size: var(--text-caption);
-}
-
-.week-step__download {
-	display: block;
-	margin: calc(var(--spacing) * 4) auto 0;
 }
 
 /* Role info page. */

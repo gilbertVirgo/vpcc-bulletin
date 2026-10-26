@@ -96,6 +96,7 @@ function render(): void {
         }),
         onDeleteWeek: deleteWeek,
         conflicts,
+        download: true,
       }),
     ].filter((n): n is HTMLElement => n !== null),
   );

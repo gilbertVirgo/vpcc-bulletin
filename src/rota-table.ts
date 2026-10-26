@@ -7,6 +7,7 @@ export type TableOptions = {
   onEditCell?: (week: Week, role: Role) => void;
   onDeleteWeek?: (week: Week, button: HTMLButtonElement) => void;
   conflicts?: Map<string, string[]>; // cellKey -> messages, from findConflicts
+  download?: boolean; // a "Download image" link per Sunday, for signed-in users to share
 };
 
 /** Stable hook for putting focus back on a cell after the table is re-rendered. */
@@ -27,7 +28,7 @@ export function rotaTable(
   opts: TableOptions = {},
 ): HTMLElement {
   const names = new Map(people.map((p) => [p.id, p.name]));
-  const { onEditCell, onDeleteWeek, conflicts } = opts;
+  const { onEditCell, onDeleteWeek, conflicts, download } = opts;
 
   const head = h(
     "tr",
@@ -45,6 +46,18 @@ export function rotaTable(
               { type: "button", class: "week-remove", onclick: (e) => onDeleteWeek(w, e.currentTarget as HTMLButtonElement) },
               "Remove week",
               h("span", { class: "visually-hidden" }, ` ${shortDate(w.date)}`),
+            )
+          : null,
+        download
+          ? h(
+              "button",
+              {
+                type: "button",
+                class: "week-download",
+                onclick: () => void downloadImage(w, roles.map((r) => [r.name, namesIn(w, r, names) || "–"])),
+              },
+              "Download image",
+              h("span", { class: "visually-hidden" }, ` of ${shortDate(w.date)}`),
             )
           : null,
       ),
@@ -137,22 +150,11 @@ export function rotaWeek(roles: Role[], people: PersonName[], weeks: Week[]): HT
   }
   show();
 
-  const download = h(
-    "button",
-    {
-      type: "button",
-      class: "button button--secondary button--sm week-step__download",
-      onclick: () => void downloadImage(weeks[i], roles.map((r) => [r.name, namesIn(weeks[i], r, names) || "–"])),
-    },
-    "Download an image",
-    h("span", { class: "visually-hidden" }, " of this Sunday's rota"),
-  );
-
-  return h("section", { class: "week-step", "aria-label": "Sunday rota" }, h("div", { class: "week-step__nav" }, prev, title, next), list, download);
+  return h("section", { class: "week-step", "aria-label": "Sunday rota" }, h("div", { class: "week-step__nav" }, prev, title, next), list);
 }
 
 /** Saves one Sunday as a PNG (role | names, zebra rows) in the page's own font and colours, for sharing in group chats. */
-async function downloadImage(week: Week, rows: [string, string][]): Promise<void> {
+async function downloadImage(week: Week | GeneratedWeek, rows: [string, string][]): Promise<void> {
   await document.fonts.ready;
   const body = getComputedStyle(document.body);
   const sunken = getComputedStyle(document.documentElement).getPropertyValue("--color-surface-sunken");
